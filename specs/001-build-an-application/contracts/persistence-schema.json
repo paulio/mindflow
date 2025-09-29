@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mindflow.persistence.schema.v1",
+  "title": "MindflowPersistenceV1",
+  "type": "object",
+  "required": ["graph", "nodes", "edges"],
+  "properties": {
+    "graph": {
+      "type": "object",
+      "required": ["id", "name", "created", "lastModified", "lastOpened", "schemaVersion"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1, "maxLength": 80},
+        "created": {"type": "string", "format": "date-time"},
+        "lastModified": {"type": "string", "format": "date-time"},
+        "lastOpened": {"type": "string", "format": "date-time"},
+        "schemaVersion": {"type": "integer", "minimum": 1},
+        "settings": {
+          "type": "object",
+          "properties": {
+            "autoLoadLast": {"type": "boolean"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "graphId", "text", "x", "y", "created", "lastModified"],
+        "properties": {
+          "id": {"type": "string"},
+          "graphId": {"type": "string"},
+          "text": {"type": "string", "maxLength": 255},
+          "x": {"type": "number"},
+          "y": {"type": "number"},
+          "created": {"type": "string", "format": "date-time"},
+          "lastModified": {"type": "string", "format": "date-time"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "graphId", "sourceNodeId", "targetNodeId", "created"],
+        "properties": {
+          "id": {"type": "string"},
+          "graphId": {"type": "string"},
+          "sourceNodeId": {"type": "string"},
+          "targetNodeId": {"type": "string"},
+          "created": {"type": "string", "format": "date-time"},
+          "undirected": {"type": "boolean", "const": true}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
