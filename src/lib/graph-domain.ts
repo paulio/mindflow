@@ -15,7 +15,7 @@ export function createNode(input: CreateNodeInput): NodeRecord {
   };
 }
 
-export interface CreateEdgeInput { graphId: string; sourceNodeId: string; targetNodeId: string; }
+export interface CreateEdgeInput { graphId: string; sourceNodeId: string; targetNodeId: string; sourceHandleId?: string; targetHandleId?: string; }
 export function createEdge(input: CreateEdgeInput): EdgeRecord {
   if (input.sourceNodeId === input.targetNodeId) throw new Error('self edge not allowed');
   const now = new Date().toISOString();
@@ -24,6 +24,8 @@ export function createEdge(input: CreateEdgeInput): EdgeRecord {
     graphId: input.graphId,
     sourceNodeId: input.sourceNodeId,
     targetNodeId: input.targetNodeId,
+    sourceHandleId: input.sourceHandleId,
+    targetHandleId: input.targetHandleId,
     created: now,
     undirected: true
   };

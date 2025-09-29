@@ -23,6 +23,8 @@ export interface EdgeRecord {
   graphId: string;
   sourceNodeId: string;
   targetNodeId: string;
+  sourceHandleId?: string;
+  targetHandleId?: string;
   created: string;
   undirected: true;
 }

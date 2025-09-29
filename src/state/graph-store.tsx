@@ -12,8 +12,8 @@ interface GraphContext extends GraphState {
   renameGraph(name: string): Promise<void>;
   removeGraph(id: string): Promise<void>;
   addNode(x: number, y: number): NodeRecord | null;
-  addEdge(source: string, target: string): void;
-  addConnectedNode(sourceNodeId: string, x: number, y: number): NodeRecord | null; // atomic node+edge
+  addEdge(source: string, target: string, sourceHandleId?: string, targetHandleId?: string): void;
+  addConnectedNode(sourceNodeId: string, x: number, y: number, sourceHandleId?: string, targetHandleId?: string): NodeRecord | null; // atomic node+edge with directional handle metadata
   updateNodeText(nodeId: string, text: string): void;
   moveNode(nodeId: string, x: number, y: number): void;
   // Centralized edit focus management so ReactFlow re-renders do not lose edit mode when selection changes.
@@ -79,14 +79,14 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return n;
   }, [graph]);
 
-  const addEdge = useCallback((source: string, target: string) => {
+  const addEdge = useCallback((source: string, target: string, sourceHandleId?: string, targetHandleId?: string) => {
     if (!graph) return;
     if (source === target) return; // no self edges
     // Prevent duplicate edge (same direction) creation
     let exists = false;
     setEdges(es => {
       if (es.some(edge => edge.sourceNodeId === source && edge.targetNodeId === target)) { exists = true; return es; }
-      const e = createEdge({ graphId: graph.id, sourceNodeId: source, targetNodeId: target });
+      const e = createEdge({ graphId: graph.id, sourceNodeId: source, targetNodeId: target, sourceHandleId, targetHandleId });
       // Fire side-effects outside setState function to keep it pure-ish
       setTimeout(() => {
         events.emit('edge:created', { graphId: graph.id, edgeId: e.id });
@@ -98,12 +98,14 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [graph]);
 
   // Atomic creation: if edge creation fails, node is not persisted.
-  const addConnectedNode = useCallback((sourceNodeId: string, x: number, y: number): NodeRecord | null => {
+  const addConnectedNode = useCallback((sourceNodeId: string, x: number, y: number, sourceHandleId?: string, targetHandleId?: string): NodeRecord | null => {
     if (!graph) return null;
     let created: NodeRecord | null = null;
     try {
+      // eslint-disable-next-line no-console
+      console.debug('[graph-store] addConnectedNode invoked', { sourceNodeId, x, y, sourceHandleId, targetHandleId });
       created = createNode({ graphId: graph.id, x, y });
-      const edge = createEdge({ graphId: graph.id, sourceNodeId, targetNodeId: created.id });
+      const edge = createEdge({ graphId: graph.id, sourceNodeId, targetNodeId: created.id, sourceHandleId, targetHandleId });
       setNodes(ns => [...ns, created!]);
       setEdges(es => [...es, edge]);
       // Debug visibility: log creation so we can confirm in browser console.
