@@ -67,6 +67,7 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 7. **Given** one or more existing mind-maps, **When** I delete one via the management UI and confirm, **Then** it is removed from the list and not available on subsequent reload.
 8. **Given** a graph with many nodes, **When** I pan or zoom the canvas, **Then** node positions and edge routes remain visually consistent and no data loss occurs.
 9. **Given** a saved map, **When** I refresh the browser/app, **Then** the last opened graph auto-loads automatically without prompting.
+10. **Given** a node displayed on the canvas, **When** I single‑click to select it and then drag its body (mouse/touch drag), **Then** the node follows the pointer continuously, all connected edges update their geometry in real time, and on release the new position is persisted.
 
 ### Edge Cases
 - Creating many nodes rapidly (drag spamming) should not produce orphan edges or duplicate node IDs.
@@ -108,7 +109,7 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - **FR-022**: System MUST store data locally (e.g., IndexedDB/local file) without requiring authentication; multi-device sync is out of scope.
 - **FR-023**: System MUST allow clearing (reset) of current graph (soft delete all nodes) with confirmation.
 - **FR-024**: System MUST ensure no orphan edges exist after node deletion (cascade removal of related edges).
-- **FR-025**: System SHOULD allow repositioning nodes via drag while maintaining edges in real time.
+- **FR-025**: System MUST allow repositioning a node by single-selecting (one click/tap) and dragging its body; edges MUST update in real time during movement and the final position MUST persist on drag end.
 - **FR-026**: System MUST update lastModified timestamp on any structural or textual change.
 - **FR-027**: System MUST provide an undo/redo stack (depth 10) covering create, text edit commit, move, delete operations.
 - **FR-028**: System MUST provide visual focus / selection state for exactly one node (or none) at a time.

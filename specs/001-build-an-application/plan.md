@@ -38,12 +38,21 @@ Autosave provides debounced writes to local IndexedDB-backed stores (with option
 and accessibility targets derived from constitution and preliminary assumptions.
 
 ### Spec Updates (2025-09-29)
-Added FR-005a (double‑click activates edit mode) and FR-005b (Enter/blur commits). Strengthened FR-004 to require atomic node+edge creation (no orphan nodes). Acceptance scenarios renumbered to include editing interactions (scenarios 3 & 4). Plan adjustments:
-1. New integration tests for double‑click entry, commit behavior, and edit-mode idempotency.
-2. New unit/domain test enforcing rollback if edge creation fails (atomic invariant of FR-004).
-3. ThoughtNode component enhancement to support double‑click activation & caret placement.
-4. Update quickstart & documentation to mention double‑click editing.
-5. Potential undo stack inclusion for edit begin/commit events (evaluate minimal granularity vs current text commit entries).
+1. Added FR-005a (double‑click activates edit mode) and FR-005b (Enter/blur commits).
+2. Strengthened FR-004 to require atomic node+edge creation (no orphan nodes).
+3. Elevated FR-025 from SHOULD to MUST: single select then drag to reposition a node with real‑time edge geometry update & persistence on release.
+4. Added Acceptance Scenario #10 covering reposition drag workflow.
+5. Directional node creation continues to rely on N/S/E/W handles, but implementation strategy updated to use native React Flow connection drag (onConnectStart/onConnectEnd) instead of a custom overlay component.
+
+Plan adjustments (delta):
+- Add integration test: reposition node (drag) updates position & edges live; persists after drop (FR-025 / Scenario #10).
+- Add unit test: move operation emits node:moved event and rounds coordinates.
+- Add integration test: below-distance (<80px) connection drag cancellation (FR-020) results in no node creation.
+- Add integration test: handle → handle direct connection still creates edge only (no node spawn) and prevents duplicates.
+- Remove tasks related to bespoke NodeHandles overlay (ghost preview) – replaced by native connect flow.
+- Add implementation task to conditionally render directional handles only when node is selected (ensure FR-003 remains valid after simplification).
+- Add undo/redo behavior verification for move operations (creates one undo entry representing final position, not interim ephemeral states).
+- Update quickstart & docs to mention: “Drag from a directional handle to empty canvas to create a connected node” and “Single-click + drag a node body to reposition it.”
 
 ## Technical Context
 **Language/Version**: TypeScript (ES2022 target) via Vite + React 18

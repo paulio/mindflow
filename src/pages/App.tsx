@@ -1,5 +1,6 @@
 import React from 'react';
 import { GraphProvider, useGraph } from '../state/graph-store';
+import { ReactFlowProvider } from 'reactflow';
 import { GraphCanvas } from '../components/graph/GraphCanvas';
 import { GraphListPanel } from '../components/panels/GraphListPanel';
 import { GraphMetaPanel } from '../components/panels/GraphMetaPanel';
@@ -29,7 +30,9 @@ const Canvas: React.FC = () => {
 
 const App: React.FC = () => (
   <GraphProvider>
-    <Canvas />
+    <ReactFlowProvider>
+      <Canvas />
+    </ReactFlowProvider>
   </GraphProvider>
 );
 

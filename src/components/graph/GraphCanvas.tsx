@@ -1,5 +1,5 @@
-import React, { useMemo, useRef } from 'react';
-import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, OnEdgesChange, Connection, Handle, Position, OnConnectStart, OnConnectEnd, useReactFlow, ReactFlowProvider } from 'reactflow';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
+import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, OnEdgesChange, Connection, Handle, Position, OnConnectStart, OnConnectEnd, useReactFlow, applyNodeChanges } from 'reactflow';
 import { ThoughtEdge } from './ThoughtEdge';
 import { useGraph } from '../../state/graph-store';
 import 'reactflow/dist/style.css';
@@ -8,10 +8,10 @@ import { ThoughtNode } from '../nodes/ThoughtNode';
 
 const handleStyle: React.CSSProperties = { width: 10, height: 10, border: '2px solid #0d0f17', background: '#555', zIndex: 1 };
 const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
-  const { id, data } = props as any;
+  const { id, data, selected } = props as any;
   return (
     <div style={{ position: 'relative' }}>
-      <ThoughtNode id={id} text={data.label} />
+      <ThoughtNode id={id} text={data.label} selected={!!selected} />
       {/* Directional source handles */}
       <Handle type="source" id="n" position={Position.Top} style={{ ...handleStyle, background: '#4da3ff' }} />
       <Handle type="source" id="e" position={Position.Right} style={{ ...handleStyle, background: '#4da3ff' }} />
@@ -26,14 +26,31 @@ const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
   );
 };
 
-const InnerGraphCanvas: React.FC = () => {
-  const { nodes, edges, startEditing, editingNodeId, moveNode, setNodePositionEphemeral, addEdge, addNode } = useGraph();
+export const GraphCanvas: React.FC = () => {
+  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addNode } = useGraph();
+  // Local React Flow controlled nodes (decoupled from store during drag for stability)
+  const [flowNodes, setFlowNodes] = useState<any[]>([]);
+  // Initialize / merge store nodes into local state (add new, update labels). Positions updated when not currently dragging.
+  useEffect(() => {
+    setFlowNodes(cur => {
+      const byId = new Map(cur.map(n => [n.id, n]));
+      const next = nodes.map((n: any) => {
+        const existing = byId.get(n.id);
+        if (existing) {
+          // Keep existing position while dragging; we'll overwrite on commit via moveNode.
+          return { ...existing, data: { label: n.text || 'New Thought' } };
+        }
+        return { id: n.id, type: 'thought', position: { x: n.x, y: n.y }, data: { label: n.text || 'New Thought' }, tabIndex: 0 };
+      });
+      return next;
+    });
+  }, [nodes]);
   const rfInstance = useReactFlow();
   // Track the start of a connection drag so we can create a node if released on pane.
   const connectStartRef = useRef<{ nodeId: string; handleId?: string; startClientX: number; startClientY: number } | null>(null);
 
   const DRAG_THRESHOLD = 80; // px in flow space (after zoom scaling) consistent with earlier spec
-  const rfNodes = useMemo(() => nodes.map((n: { id: string; x: number; y: number; text?: string }) => ({ id: n.id, type: 'thought', position: { x: n.x, y: n.y }, data: { label: n.text || 'New Thought' }, tabIndex: 0 })), [nodes]);
+  const rfNodes = flowNodes; // already memoized by state
   const rfEdges = useMemo(
     () => edges.map((e: any) => ({
       id: e.id,
@@ -48,15 +65,11 @@ const InnerGraphCanvas: React.FC = () => {
     [edges]
   );
   const onNodesChange: OnNodesChange = (changes) => {
-    for (const c of changes) {
-      if (c.type === 'position' && c.position) {
-        if (c.dragging) {
-          setNodePositionEphemeral(c.id, c.position.x, c.position.y);
-        } else {
-          moveNode(c.id, c.position.x, c.position.y);
-        }
-      }
-    }
+    setFlowNodes(ns => applyNodeChanges(changes, ns));
+  };
+  const onNodeDragStop = (_: React.MouseEvent, node: Node) => {
+    // Persist final position to store
+    moveNode(node.id, node.position.x, node.position.y);
   };
   const onEdgesChange: OnEdgesChange = () => { /* edge selection not yet persisted */ };
   const onConnect = (connection: Connection) => {
@@ -130,6 +143,7 @@ const InnerGraphCanvas: React.FC = () => {
         fitView
   onNodesChange={onNodesChange}
   onEdgesChange={onEdgesChange}
+  onNodeDragStop={onNodeDragStop}
         zoomOnDoubleClick={false}
         onNodeDoubleClick={(e: React.MouseEvent, node: Node) => {
           e.preventDefault();
@@ -157,9 +171,3 @@ const InnerGraphCanvas: React.FC = () => {
     </div>
   );
 };
-
-export const GraphCanvas: React.FC = () => (
-  <ReactFlowProvider>
-    <InnerGraphCanvas />
-  </ReactFlowProvider>
-);

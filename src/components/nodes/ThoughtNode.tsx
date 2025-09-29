@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ariaNodeLabel, focusClass } from '../../lib/a11y';
 import { useGraph } from '../../state/graph-store';
 
-interface Props { id: string; text: string; }
-export const ThoughtNode: React.FC<Props> = ({ id, text }) => {
+interface Props { id: string; text: string; selected?: boolean; }
+export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
   const { updateNodeText, editingNodeId, startEditing, stopEditing } = useGraph();
   const editing = editingNodeId === id;
   const [draft, setDraft] = useState(text);
@@ -33,7 +33,17 @@ export const ThoughtNode: React.FC<Props> = ({ id, text }) => {
         e.stopPropagation();
         if (!editing) startEditing(id);
       }}
-      style={{ padding: 8, background: '#1b1b1f', border: '1px solid #2a2a30', borderRadius: 6, minWidth: 120, cursor: 'text', userSelect: 'none' }}
+      style={{
+        padding: 8,
+        background: selected ? '#22242a' : '#1b1b1f',
+        border: selected ? '2px solid var(--color-accent)' : '1px solid #2a2a30',
+        boxShadow: selected ? '0 0 0 3px rgba(79,157,255,0.35)' : 'none',
+        transition: 'background .15s var(--ease-standard), border .15s var(--ease-standard), box-shadow .15s var(--ease-standard)',
+        borderRadius: 6,
+        minWidth: 120,
+        cursor: 'text',
+        userSelect: 'none'
+      }}
     >
       {editing ? (
         <input
