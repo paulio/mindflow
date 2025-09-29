@@ -61,7 +61,8 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 1. **Given** I create a new mind-map, **Then** a default root thought-node (with placeholder text "New Thought") is created automatically at the origin and focused for immediate editing.
 2. **Given** a selected node with visible NSEW handles, **When** I drag a handle outward and release, **Then** exactly one new node is created positioned in that direction AND simultaneously an edge linking it to the origin node is created (no moment exists where the node is present without its connecting edge); the new node is focused for text entry and the connection is persisted.
 3. **Given** a node not currently being edited, **When** I double‑click its body (not a handle), **Then** it enters text edit mode and the caret appears at the end of its existing text.
-4. **Given** a node in text edit mode, **When** I press Enter/Return OR click anywhere outside the node, **Then** the edit is committed (no newline added), edit mode ends, and the change is scheduled for debounced persistence.
+4. **Given** a node in text edit mode, **When** I press Enter/Return (without modifiers) OR click anywhere outside the node, **Then** the edit is committed (no newline added), edit mode ends, and the change is scheduled for debounced persistence.
+5. **Given** a node in text edit mode, **When** I press Shift+Enter, **Then** a newline character is inserted at the caret position, the node height expands to fit (multi-line), and edit mode continues (no premature commit).
 5. **Given** a populated mind-map, **When** I edit the text in an existing node (add/remove characters), **Then** the change is auto‑saved within <500ms (debounced) to local storage.
 6. **Given** multiple saved mind-maps stored locally, **When** I open the "Load" dialog and select one, **Then** the full graph (nodes, text, positions, edges, last opened timestamp) loads onto the canvas.
 7. **Given** one or more existing mind-maps, **When** I delete one via the management UI and confirm, **Then** it is removed from the list and not available on subsequent reload.
@@ -89,7 +90,8 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - **FR-004**: System MUST allow dragging a directional handle to spawn a new node connected by an edge to the origin node. Node and edge creation MUST be atomic—if the edge cannot be created the node MUST NOT persist (no orphan nodes from handle drags).
 - **FR-005**: System MUST allow editing node text inline with immediate visual update.
 - **FR-005a**: System MUST enter single-line text edit mode for a node when the user double‑clicks the node body (excluding its handles). Caret SHOULD be placed at end of text.
-- **FR-005b**: While in text edit mode, pressing Enter/Return OR blurring focus MUST commit the edit (no newline inserted) and exit edit mode. Escape SHOULD cancel changes since last commit (optional enhancement—if omitted treat as out of scope).
+- **FR-005b**: While in text edit mode, pressing Enter/Return (without Shift/Alt/Ctrl) OR blurring focus MUST commit the edit (no newline inserted) and exit edit mode. Escape SHOULD cancel changes since last commit (optional enhancement—if omitted treat as out of scope).
+- **FR-005c**: While in text edit mode, pressing Shift+Enter MUST insert a newline at the caret position and keep the editor active (multi-line support). The node MUST auto-resize vertically to fit its content up to a reasonable max height (implementation-defined; truncation/scrolling approach deferred). Character limit (FR-019) applies across all lines (total length ≤255).
 - **FR-006**: System MUST auto-save node and edge changes (create/update/delete) to a local persistence layer within 500ms of stable change (debounced) and guarantee durability after 2s of inactivity; in-progress text composition MUST NOT flush partial states mid-stroke.
 - **FR-007**: System MUST persist: graph metadata (id, name, created, lastModified), nodes (id, text, position x,y), edges (source, target), and lastOpened timestamp.
 - **FR-008**: System MUST provide UI to list existing saved mind-maps sorted by lastModified descending.
@@ -103,7 +105,7 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - **FR-016**: System MUST debounce text updates so rapid typing does not trigger more than 2 persistence writes per second per node.
 - **FR-017**: System MUST assign deterministic ordering for nodes in serialization to avoid spurious diffs.
 - **FR-018**: System MUST handle window refresh by reloading currently open graph state from persistence.
-- **FR-019**: System MUST validate node text length (max 255 characters); reject additional input beyond limit (visual feedback required).
+- **FR-019**: System MUST validate node text length (max 255 characters across all lines); reject additional input beyond limit (visual feedback required). Newlines count toward total length (e.g., '\n').
 - **FR-020**: System SHOULD prevent creation of a new node if drag distance < 80px from origin node center (treat as cancelled handle drag).
 - **FR-021**: (Reserved) Keyboard shortcuts are explicitly out of scope for initial release.
 - **FR-022**: System MUST store data locally (e.g., IndexedDB/local file) without requiring authentication; multi-device sync is out of scope.

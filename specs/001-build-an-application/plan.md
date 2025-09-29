@@ -43,6 +43,7 @@ and accessibility targets derived from constitution and preliminary assumptions.
 3. Elevated FR-025 from SHOULD to MUST: single select then drag to reposition a node with real‑time edge geometry update & persistence on release.
 4. Added Acceptance Scenario #10 covering reposition drag workflow.
 5. Directional node creation continues to rely on N/S/E/W handles, but implementation strategy updated to use native React Flow connection drag (onConnectStart/onConnectEnd) instead of a custom overlay component.
+6. Added FR-005c + Acceptance Scenario #5: Shift+Enter inserts newline (multi-line node text), editor remains active; FR-019 updated to clarify 255 char limit applies across all lines including newline characters.
 
 Plan adjustments (delta):
 - Add integration test: reposition node (drag) updates position & edges live; persists after drop (FR-025 / Scenario #10).
@@ -53,6 +54,10 @@ Plan adjustments (delta):
 - Add implementation task to conditionally render directional handles only when node is selected (ensure FR-003 remains valid after simplification).
 - Add undo/redo behavior verification for move operations (creates one undo entry representing final position, not interim ephemeral states).
 - Update quickstart & docs to mention: “Drag from a directional handle to empty canvas to create a connected node” and “Single-click + drag a node body to reposition it.”
+- IMPLEMENT MULTI-LINE: Replace single-line input with auto-resizing textarea (or contenteditable) honoring Shift+Enter newline insertion (FR-005c) while plain Enter commits.
+- Add unit test for text update enforcing max length across newlines (FR-019) and preserving newline characters in persistence serialization order.
+- Add integration test: editing a node, typing text, pressing Shift+Enter inserts newline (height increases), later pressing Enter commits both lines.
+- Update serialization contract doc if needed to clarify text may contain '\n'.
 
 ## Technical Context
 **Language/Version**: TypeScript (ES2022 target) via Vite + React 18

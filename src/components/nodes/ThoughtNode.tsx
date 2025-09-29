@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ariaNodeLabel, focusClass } from '../../lib/a11y';
 import { useGraph } from '../../state/graph-store';
 
@@ -7,20 +7,52 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
   const { updateNodeText, editingNodeId, startEditing, stopEditing } = useGraph();
   const editing = editingNodeId === id;
   const [draft, setDraft] = useState(text);
-  const inputRef = useRef<HTMLInputElement|null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement|null>(null);
 
-  useEffect(() => { if (editing) { inputRef.current?.focus(); inputRef.current?.setSelectionRange(draft.length, draft.length); }}, [editing, draft.length]);
+  // When entering edit mode focus and place caret at end.
+  useEffect(() => {
+    if (editing) {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        const len = draft.length;
+        ta.setSelectionRange(len, len);
+        autoResize();
+      }
+    }
+  }, [editing]);
+  // Sync incoming text when not editing
   useEffect(() => { if (!editing) setDraft(text); }, [text, editing]);
 
-  function commit() {
-    if (draft !== text) updateNodeText(id, draft);
+  const commit = useCallback(() => {
+    if (draft !== text) updateNodeText(id, draft.slice(0,255));
     stopEditing();
-  }
-  function cancel() { setDraft(text); stopEditing(); }
+  }, [draft, text, id, updateNodeText, stopEditing]);
 
-  function onKey(e: React.KeyboardEvent) {
-    if (e.key === 'Enter') { e.preventDefault(); commit(); }
-    else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  const cancel = useCallback(() => { setDraft(text); stopEditing(); }, [text, stopEditing]);
+
+  function autoResize() {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 300) + 'px'; // soft max height 300px
+  }
+  function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      commit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancel();
+    }
+    // Shift+Enter: allow newline default (handled by browser) then resize next frame
+    requestAnimationFrame(autoResize);
+  }
+
+  function onChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const next = e.target.value.slice(0,255); // enforce limit including newlines
+    setDraft(next);
+    requestAnimationFrame(autoResize);
   }
 
   return (
@@ -42,21 +74,24 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
         borderRadius: 6,
         minWidth: 120,
         cursor: 'text',
-        userSelect: 'none'
+        userSelect: 'none',
+        maxWidth: 260,
+        whiteSpace: 'pre-wrap'
       }}
     >
       {editing ? (
-        <input
-          ref={inputRef}
+        <textarea
+          ref={textareaRef}
           value={draft}
-          onChange={e => setDraft(e.target.value.slice(0,255))}
+          onChange={onChange}
           onBlur={commit}
           onKeyDown={onKey}
           aria-label="Edit thought text"
-          style={{ width: '100%', background:'transparent', color:'#fff', border:'none', outline:'none' }}
+          rows={1}
+          style={{ width: '100%', resize: 'none', overflow: 'hidden', background:'transparent', color:'#fff', border:'none', outline:'none', fontFamily:'inherit', fontSize:'inherit', lineHeight:1.3 }}
         />
       ) : (
-        <span>{text || 'New Thought'}</span>
+        <span style={{ whiteSpace:'pre-wrap' }}>{text || 'New Thought'}</span>
       )}
     </div>
   );

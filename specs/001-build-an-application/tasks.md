@@ -31,8 +31,11 @@
 - [X] T019 [P] Integration test pan & zoom responsiveness baseline metrics (<40ms avg frame) (`tests/integration/perf-panzoom.spec.ts`)
 - [X] T020 [P] Integration test accessibility (tab order + handle aria labels) (`tests/integration/accessibility.spec.ts`)
  - [ ] T057 [P] Integration test double-click enters edit mode & caret at end (FR-005a) (`tests/integration/dblclick-edit.spec.ts`)
- - [ ] T058 [P] Integration test Enter/blur commits edit without newline (FR-005b) (`tests/integration/edit-commit.spec.ts`)
+ - [ ] T058 [P] Integration test Enter (no modifiers)/blur commits edit (FR-005b) (`tests/integration/edit-commit.spec.ts`)
  - [ ] T059 [P] Integration test edit mode idempotency + Enter no-op (no text change) (`tests/integration/edit-idempotent.spec.ts`)
+ - [ ] T066 [P] Integration test Shift+Enter inserts newline, remains editing, later Enter commits multi-line (FR-005c) (`tests/integration/multiline-edit.spec.ts`)
+ - [ ] T067 [P] Integration test node reposition drag persists final position & edges update (FR-025) (`tests/integration/reposition-node.spec.ts`)
+ - [ ] T068 [P] Integration test <80px connection drag cancels node creation (FR-020) (`tests/integration/drag-threshold-cancel.spec.ts`)
 
 ### Unit / Component Tests (Early Core Logic Without Implementation)
 - [X] T021 [P] Unit test graph ID + node/edge uniqueness utilities (`tests/unit/graph-ids.test.ts`)
@@ -40,6 +43,8 @@
 - [X] T023 [P] Unit test debounce autosave scheduler (mock timer) (`tests/unit/autosave-scheduler.test.ts`)
 - [X] T024 [P] Unit test undo/redo stack operations depth enforcement (`tests/unit/undo-stack.test.ts`)
  - [ ] T060 [P] Unit test atomic node+edge creation invariant (simulate edge failure -> rollback node) (`tests/unit/atomic-node-edge.test.ts`)
+ - [ ] T069 [P] Unit test multi-line length limit (255 total incl newlines) (`tests/unit/multiline-length.test.ts`)
+ - [ ] T070 [P] Unit test moveNode single persistence event after drag stop (`tests/unit/move-node.test.ts`)
 
 ## Phase 3.3: Core Implementation (ONLY after above tests are added & failing)
 - [X] T025 Implement persistence layer IndexedDB adapter `src/lib/indexeddb.ts` (init stores, CRUD, batch writes)
@@ -53,14 +58,16 @@
 - [X] T033 Implement base App shell `src/pages/App.tsx` (layout regions: canvas, side panel)
 - [X] T034 Implement ReactFlow wrapper `src/components/graph/GraphCanvas.tsx` (node/edge types, pan/zoom config, selection)
 - [X] T035 Implement ThoughtNode component `src/components/nodes/ThoughtNode.tsx` with inline editing + default text fallback (basic version)
- - [X] T036 Implement directional handle interaction logic `src/components/nodes/NodeHandles.tsx` (drag threshold 80px)
+ - [X] T036 Implement directional handles via native React Flow (n/e/s/w) + connection-based node creation (>=80px threshold)
  - [X] T037 Implement Graph List panel `src/components/panels/GraphListPanel.tsx` (list, select, delete confirm)
  - [X] T038 Implement graph rename & metadata actions `src/components/panels/GraphMetaPanel.tsx`
  - [X] T039 Implement accessibility helpers on nodes & handles (aria-labels, tab index ordering) integrated into components (basic spatial ordering via tab sequence)
 - [X] T040 Wire undo/redo UI controls `src/components/ui/UndoRedoBar.tsx`
 - [X] T041 Wire autosave status indicator `src/components/ui/SaveStatus.tsx`
  - [ ] T061 Enhance ThoughtNode for double‑click to enter edit mode & caret placement (FR-005a)
- - [ ] T062 Implement commit handling (Enter/blur) + prevent newline insertion (FR-005b) & optional Escape cancel logic
+ - [ ] T062 Implement commit handling (Enter/blur) plain Enter commits; optional Escape cancel (FR-005b)
+ - [ ] T064 Replace single-line input with auto-resizing textarea; Shift+Enter newline insertion (FR-005c)
+ - [ ] T065 Auto-resize node container for multi-line text (max height or scroll strategy)
 
 ## Phase 3.4: Integration
 - [ ] T042 Integrate autosave + event bus into GraphCanvas lifecycle
@@ -81,6 +88,8 @@
 - [ ] T055 Manual validation checklist execution record `/specs/001-build-an-application/manual-validation.md`
 - [ ] T056 Final coverage & performance report generation `scripts/report-summary.md`
  - [ ] T063 Update quickstart & user help to document double‑click editing `/specs/001-build-an-application/quickstart.md`
+ - [ ] T071 Update quickstart/docs for multi-line editing (Shift+Enter) & reposition drag
+ - [ ] T072 Update serialization contract to note newline characters in node text
 
 ## Dependencies
 - Setup (T001-T008) before tests.
@@ -88,11 +97,11 @@
 - Persistence (T025) before graph store (T030) & autosave (T028) depends on persistence.
 - Domain utilities (T027) before hooks (T028, T029) and components (T034-T036).
 - Graph store (T030) before GraphCanvas (T034) & panels (T037, T038).
-- Accessibility helpers (T039) depend on ThoughtNode (T035) & NodeHandles (T036).
+- Accessibility helpers (T039) depend on ThoughtNode (T035) & handles (T036).
 - Integration tasks (T042-T048) depend on core components/hooks completed.
 - Polish tasks (T049+) after integration stable.
- - New double-click edit implementation tasks (T061, T062) depend on ThoughtNode base (T035) and should precede undo integration refinements.
- - Edit-related integration tests (T057-T059) precede implementation (T061-T062) per TDD; atomic invariant unit test (T060) precedes any refactors to creation flow.
+ - Edit-related integration tests (T057-T059, T066-T068) precede implementation enhancements (T061-T065) per TDD.
+ - Atomic invariant unit test (T060) precedes any refactors to creation flow.
 
 ## Parallel Execution Examples
 ```
