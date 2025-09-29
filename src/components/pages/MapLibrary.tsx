@@ -17,9 +17,31 @@ export const MapLibrary: React.FC = () => {
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
             {graphs.map(g => (
               <li key={g.id}>
-                <button style={{ width: '100%', textAlign: 'left', background: '#1b1d25', border: '1px solid #333', padding: '6px 8px', cursor: 'pointer' }} onClick={() => selectGraph(g.id)}>
-                  <div style={{ fontWeight: 600 }}>{g.name}</div>
-                  <div style={{ fontSize: 11, opacity: 0.65 }}>Last opened {new Date(g.lastOpened).toLocaleString()}</div>
+                <button
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    background: 'var(--color-surface)',
+                    border: '1px solid var(--color-border)',
+                    padding: '6px 10px',
+                    cursor: 'pointer',
+                    color: 'var(--color-text)',
+                    borderRadius: 'var(--radius-md)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                    fontSize: 13,
+                    lineHeight: 1.3,
+                    transition: 'background var(--dur-med) var(--ease-standard), border var(--dur-med) var(--ease-standard)'
+                  }}
+                  onClick={() => selectGraph(g.id)}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#25262c'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-surface)'; }}
+                  onFocus={e => { (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 0 2px var(--color-focus-ring)'; }}
+                  onBlur={e => { (e.currentTarget as HTMLButtonElement).style.boxShadow = 'none'; }}
+                >
+                  <div style={{ fontWeight: 600, letterSpacing: .3 }}>{g.name}</div>
+                  <div style={{ fontSize: 11, opacity: 0.78, fontFamily: 'monospace' }}>Last opened {new Date(g.lastOpened).toLocaleString()}</div>
                 </button>
               </li>
             ))}
