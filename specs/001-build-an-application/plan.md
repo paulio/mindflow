@@ -47,6 +47,7 @@ and accessibility targets derived from constitution and preliminary assumptions.
 7. Added Acceptance Scenarios #11–#14 introducing explicit separation between a Map Library (list of saved maps) and the Editing Canvas (single active map context) with navigation, transition, and state reset semantics.
 8. Added FR-031..FR-035 defining: dedicated Library view (FR-031), explicit transition on load (FR-032), guarded back navigation with unsaved-change warning (FR-033 leveraging FR-030), non-destructive isolation of library operations from active canvas (FR-034), and per-map viewport persistence & restoration (FR-035).
 9. Edge Cases expanded: viewport isolation, unsaved-change guard on library navigation, rapid map switching without leaking pan/zoom transforms.
+10. Added FR-036..FR-040a introducing a global Theme Manager (accessible through Details pane) with two initial themes (classic & subtle), global (not per-graph) persistence, immediate re-render on switch, accessibility contrast requirements, and explicit UI separation within the Details pane to convey scope.
 
 Plan adjustments (delta):
 - Add integration test: reposition node (drag) updates position & edges live; persists after drop (FR-025 / Scenario #10).
@@ -66,6 +67,10 @@ Plan adjustments (delta):
  - Add unit tests: viewport persistence serialize/restore; library isolation (non-active map operations do not mutate current canvas).
  - Implementation additions: Library view component, navigation control (Back), unsaved-change guard leveraging autosave pending state, per-map viewport storage (extend persistence schema), selection/edit state reset on map switch.
  - Documentation updates: quickstart to differentiate “Managing Maps (Library)” vs “Editing a Map (Canvas)” and describe viewport restoration + warning dialog.
+ - Introduce Theme Manager architecture: global theme state, persistence layer (settings store), event emission (`theme:changed`), theme config module with typed contract.
+ - Add tasks for: theme config definition, global theme provider/store integration, Details pane Theme Manager UI section (visually separated), persistence load-before-paint strategy, accessibility contrast test (WCAG AA), event contract test, snapshot/theme switch re-render test, and fallback logic if stored theme key invalid.
+ - Add token refactor task: extract current hard-coded node/handle colors to CSS custom properties namespaced by theme (e.g., `--mf-node-bg`, `--mf-node-border`) with theme root class switch.
+ - Add subtle theme design validation step (manual + automated contrast assertion) before finalizing tokens.
 
 ## Technical Context
 **Language/Version**: TypeScript (ES2022 target) via Vite + React 18
@@ -75,7 +80,9 @@ Plan adjustments (delta):
 **Target Platform**: Modern desktop browsers (Chromium, Firefox, Safari latest), PWA potential backlog.
 **Project Type**: Single web frontend (no backend service). All logic client-side.
 **View Architecture**: Two top-level application states: (1) Map Library (non-interactive list & management actions) and (2) Editing Canvas (ReactFlow graph for one active map). Transitions: Open Map, New Map (create→auto-transition), Back to Library. Each map persists its own viewport (pan, zoom level) alongside metadata and restores it on open; library operations on other maps leave the active canvas state untouched until an explicit load.
+**Theme Architecture (NEW)**: Global theme (user-level) applied at app root via a `data-theme` attribute or root class (e.g., `.theme-classic`, `.theme-subtle`). Theme selection persists in a lightweight `settings` store (IndexedDB record) loaded before first paint (apply stored theme synchronously to avoid flash). The Details pane hosts a "Global Theme" section (visually separated) listing radio buttons or segmented control for available themes. A theme switch updates CSS custom properties (token layer) driving node background, border width/color, text color, handle colors, selection outline, and textarea styles. Switching emits `theme:changed { previousTheme, newTheme, ts }`. Invalid stored theme keys fall back to default `classic` and emit a logged warning (non-blocking). Accessibility guard: subtle theme tokens must maintain ≥4.5:1 contrast for node text vs background (validated via test computing contrast ratio from computed hex values in config).
 **Performance Goals**: 500-node cold load <1500ms; warm load <500ms; autosave p95 <150ms; frame render avg <40ms p95 <80ms during pan/zoom.
+**Theme Performance Considerations**: Theme switch MUST avoid per-node React re-render cascade where possible—prefer CSS variable swap for majority of visual changes. Node component only re-renders if theme-dependent logic (e.g., conditional class) requires it. Target <1 frame (<16ms) style recalculation on mid-size graph (≈200 nodes). Measure using PerformanceOverlay (extend existing metrics module to time theme switch).
 **Constraints**: Offline-capable; storage warning if >5MB; node text <=255 chars; undo depth 10; no multi-tab sync.
 **Scale/Scope**: MVP single-user local graphs; up to ~1000 nodes (no virtualization in MVP, performance monitoring instrumentation only).
 
@@ -262,7 +269,7 @@ Post-Design Constitution Check: PASS (see updated section below).
 - Dependency order: Models before services before UI
 - Mark [P] for parallel execution (independent files)
 
-**Estimated Output**: 34-38 tasks (expanded to include double‑click editing + atomic invariant tests) in tasks.md
+**Estimated Output**: 42-48 tasks (includes previous scope plus Theme Manager: config, provider, UI section, persistence, event tests, accessibility contrast test, token refactor, fallback handling) in tasks.md
 
 **IMPORTANT**: This phase is executed by the /tasks command, NOT by /plan
 
@@ -272,6 +279,18 @@ Post-Design Constitution Check: PASS (see updated section below).
 **Phase 3**: Task execution (/tasks command creates tasks.md)  
 **Phase 4**: Implementation (execute tasks.md following constitutional principles)  
 **Phase 5**: Validation (run tests, execute quickstart.md, performance validation)
+
+### Theme Manager Implementation Strategy (Detail)
+1. Data Contract: `ThemeId = 'classic' | 'subtle'`; `ThemeDefinition` interface enumerating semantic tokens (nodeBg, nodeBorderColor, nodeBorderWidth, nodeTextColor, handleSourceColor, handleTargetColor, selectionOutline, editorBg, editorTextColor).
+2. Config Module: `themes.ts` exporting record `themes: Record<ThemeId, ThemeDefinition>` + `defaultTheme: 'classic'`.
+3. Persistence: Extend existing settings store (or create) with single key `activeTheme`. Load synchronously (await before initial React render) using an initialization hook or pre-hydration script.
+4. Application: Apply root `<body class="theme-classic">` (or data attribute). CSS files (`tokens.css`) define theme-scoped variables under `.theme-classic` / `.theme-subtle` selectors mapping semantic names to actual values.
+5. Consumption: Components reference only semantic CSS variables (no raw hex) ensuring future theme additions are data-only changes.
+6. UI: Details pane adds section header "Global Theme" + list of radio inputs. Selection triggers store update, persistence write (debounced minimal), event emission, and immediate class swap.
+7. Events: Add to `events.md` contract entry for `theme:changed` with payload schema.
+8. Testing: (a) Contract test ensures themes expose all required keys; (b) Persistence test reloads app state applying stored theme; (c) Accessibility contrast test computes ratio using luminance formula; (d) Snapshot or DOM query test ensures node className / style changes after switch; (e) Event emission test verifying previous/new IDs.
+9. Fallback: If stored theme ID missing from config, log warn, apply default, emit `theme:changed` with `previousTheme = null`.
+10. Performance: Add metric capture around theme switch measuring duration between dispatch and next animation frame paint.
 
 ## Complexity Tracking
 *Fill ONLY if Constitution Check has violations that must be justified*

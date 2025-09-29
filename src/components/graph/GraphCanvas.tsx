@@ -6,7 +6,13 @@ import 'reactflow/dist/style.css';
 import { ThoughtNode } from '../nodes/ThoughtNode';
 // Custom directional ghost/drag handles removed in favor of native React Flow connection UX.
 
-const handleStyle: React.CSSProperties = { width: 10, height: 10, border: '2px solid #0d0f17', background: '#555', zIndex: 1 };
+const handleStyle: React.CSSProperties = {
+  width: 'var(--mf-handle-size)',
+  height: 'var(--mf-handle-size)',
+  border: 'var(--mf-handle-border-width) solid #0d0f17',
+  background: 'var(--mf-handle-target)',
+  zIndex: 1
+};
 const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
   const { id, data, selected } = props as any;
   const targetOffset = -14; // outward offset for both source (blue) & target (yellow) handles
@@ -14,15 +20,15 @@ const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
     <div style={{ position: 'relative' }}>
       <ThoughtNode id={id} text={data.label} selected={!!selected} />
       {/* Directional source handles (stay inside edge of node) */}
-  <Handle type="source" id="n" position={Position.Top} style={{ ...handleStyle, background: '#4da3ff', top: targetOffset }} />
-  <Handle type="source" id="e" position={Position.Right} style={{ ...handleStyle, background: '#4da3ff', right: targetOffset }} />
-  <Handle type="source" id="s" position={Position.Bottom} style={{ ...handleStyle, background: '#4da3ff', bottom: targetOffset }} />
-  <Handle type="source" id="w" position={Position.Left} style={{ ...handleStyle, background: '#4da3ff', left: targetOffset }} />
+  <Handle type="source" id="n" position={Position.Top} style={{ ...handleStyle, background: 'var(--mf-handle-target)', top: targetOffset }} />
+  <Handle type="source" id="e" position={Position.Right} style={{ ...handleStyle, background: 'var(--mf-handle-target)', right: targetOffset }} />
+  <Handle type="source" id="s" position={Position.Bottom} style={{ ...handleStyle, background: 'var(--mf-handle-target)', bottom: targetOffset }} />
+  <Handle type="source" id="w" position={Position.Left} style={{ ...handleStyle, background: 'var(--mf-handle-target)', left: targetOffset }} />
       {/* Directional target handles (shifted outside) */}
-      <Handle type="target" id="n" position={Position.Top} style={{ ...handleStyle, background: '#ffb347', top: targetOffset }} />
-      <Handle type="target" id="e" position={Position.Right} style={{ ...handleStyle, background: '#ffb347', right: targetOffset }} />
-      <Handle type="target" id="s" position={Position.Bottom} style={{ ...handleStyle, background: '#ffb347', bottom: targetOffset }} />
-      <Handle type="target" id="w" position={Position.Left} style={{ ...handleStyle, background: '#ffb347', left: targetOffset }} />
+  <Handle type="target" id="n" position={Position.Top} style={{ ...handleStyle, background: 'var(--mf-handle-source)', top: targetOffset }} />
+  <Handle type="target" id="e" position={Position.Right} style={{ ...handleStyle, background: 'var(--mf-handle-source)', right: targetOffset }} />
+  <Handle type="target" id="s" position={Position.Bottom} style={{ ...handleStyle, background: 'var(--mf-handle-source)', bottom: targetOffset }} />
+  <Handle type="target" id="w" position={Position.Left} style={{ ...handleStyle, background: 'var(--mf-handle-source)', left: targetOffset }} />
     </div>
   );
 };
@@ -123,7 +129,7 @@ export const GraphCanvas: React.FC = () => {
         return; // below threshold: cancel creation
       }
       // Create node centered at drop point.
-      const NEW_W = 120; const NEW_H = 40; // could be measured if needed
+  const NEW_W = 100; const NEW_H = 38; // adjusted to align with tighter padding/border
       const newNode = addNode(endGraph.x - NEW_W / 2, endGraph.y - NEW_H / 2);
       if (newNode) {
         const opposite: Record<string, string> = { n: 's', s: 'n', e: 'w', w: 'e' };
@@ -171,7 +177,7 @@ export const GraphCanvas: React.FC = () => {
           // addNode(e.clientX - bounds.left, e.clientY - bounds.top);
         }}
         defaultEdgeOptions={{ type: 'thought-edge', style: { pointerEvents: 'none' } }}
-        style={{ background: '#0d0f17' }}
+  style={{ background: '#0d0f17' }}
         onMoveEnd={(_, viewport) => { updateViewport(viewport.x, viewport.y, viewport.zoom); }}
       >
         <Background />

@@ -12,7 +12,8 @@ export type EventName =
   | 'autosave:success'
   | 'autosave:failure'
   | 'undo:applied'
-  | 'redo:applied';
+  | 'redo:applied'
+  | 'theme:changed';
 
 export interface EventPayloads {
   'graph:created': { graphId: string };
@@ -28,6 +29,7 @@ export interface EventPayloads {
   'autosave:failure': { entityType: string; attempt: number; error: unknown };
   'undo:applied': { actionType: string };
   'redo:applied': { actionType: string };
+  'theme:changed': { previousTheme: string | null; newTheme: string; ts: number };
 }
 
 type Handler<E extends EventName> = (payload: EventPayloads[E]) => void;

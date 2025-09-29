@@ -1,5 +1,6 @@
 import React from 'react';
 import { GraphProvider, useGraph } from '../state/graph-store';
+import { ThemeProvider } from '../state/theme-store';
 import { ReactFlowProvider } from 'reactflow';
 import { GraphCanvas } from '../components/graph/GraphCanvas';
 import { GraphMetaPanel } from '../components/panels/GraphMetaPanel';
@@ -33,11 +34,13 @@ const RootView: React.FC = () => {
 };
 
 const App: React.FC = () => (
-  <GraphProvider>
-    <ReactFlowProvider>
-      <RootView />
-    </ReactFlowProvider>
-  </GraphProvider>
+  <ThemeProvider>
+    <GraphProvider>
+      <ReactFlowProvider>
+        <RootView />
+      </ReactFlowProvider>
+    </GraphProvider>
+  </ThemeProvider>
 );
 
 export default App;

@@ -66,21 +66,21 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
         if (!editing) startEditing(id);
       }}
       style={{
-        padding: 6,
-        background: selected ? '#22242a' : '#1b1b1f',
-        border: selected ? '2px solid var(--color-accent)' : '1px solid #2a2a30',
-        boxShadow: selected ? '0 0 0 3px rgba(79,157,255,0.35)' : 'none',
+        padding: 4,
+        background: selected ? 'var(--mf-node-bg-selected)' : 'var(--mf-node-bg)',
+        border: `${selected ? 'var(--mf-node-border-width-selected)' : 'var(--mf-node-border-width)'} solid ${selected ? 'var(--mf-node-border-selected)' : 'var(--mf-node-border)'}`,
+        boxShadow: selected ? 'var(--mf-selection-outline)' : 'none',
         transition: 'background .15s var(--ease-standard), border .15s var(--ease-standard), box-shadow .15s var(--ease-standard)',
         borderRadius: 6,
-        minWidth: 120,
+        minWidth: 100,
         cursor: 'text',
         userSelect: 'none',
-        maxWidth: 260,
+        maxWidth: 240,
         whiteSpace: 'pre-wrap',
         fontSize: 'var(--font-size-node)',
         lineHeight: 'var(--line-height-node)',
         fontWeight: 400,
-        color: 'var(--color-text)'
+        color: 'var(--mf-node-text)'
       }}
     >
       {editing ? (
@@ -92,7 +92,7 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
           onKeyDown={onKey}
           aria-label="Edit thought text"
           rows={1}
-          style={{ width: '100%', resize: 'none', overflow: 'hidden', background:'transparent', color:'var(--color-text)', border:'none', outline:'none', fontFamily:'inherit', fontSize:'var(--font-size-node)', lineHeight:'var(--line-height-node)', textAlign:'center' }}
+          style={{ width: '100%', resize: 'none', overflow: 'hidden', background:'var(--mf-editor-bg)', color:'var(--mf-editor-text)', border:'none', outline:'none', fontFamily:'inherit', fontSize:'var(--font-size-node)', lineHeight:'var(--line-height-node)', textAlign:'center' }}
         />
       ) : (
         <span style={{ whiteSpace:'pre-wrap', display:'block', textAlign:'center' }}>{text || 'New Thought'}</span>

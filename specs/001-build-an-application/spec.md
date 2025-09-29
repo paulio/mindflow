@@ -69,6 +69,9 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 8. **Given** a graph with many nodes, **When** I pan or zoom the canvas, **Then** node positions and edge routes remain visually consistent and no data loss occurs.
 9. **Given** a saved map, **When** I refresh the browser/app, **Then** the last opened graph auto-loads automatically without prompting.
 10. **Given** a node displayed on the canvas, **When** I single‑click to select it and then drag its body (mouse/touch drag), **Then** the node follows the pointer continuously, all connected edges update their geometry in real time, and on release the new position is persisted.
+11. **Given** I am in the Details pane (theme manager visible), **When** I switch the active theme from "Classic" to "Subtle", **Then** all currently rendered nodes (borders, background, handles, text styling, editing textarea) visually update within 1 animation frame (<100ms target) without a page reload.
+12. **Given** a selected theme, **When** I reload the application, **Then** the previously selected theme is applied automatically before the canvas first paint (no flash of wrong theme) (global persistence assumption).
+13. **Given** I open the Details pane while editing a map, **Then** the Theme Manager appears in a clearly separated section labeled "Global Theme" (or equivalent) visually distinct from graph-specific metadata (name, counts) so users do not assume theme is a per‑graph attribute.
 11. **Given** I am viewing the Map Library (map list view) showing previously saved mind-maps, **When** I click a map entry, **Then** I transition to the dedicated Editing Canvas view and that map loads (nodes + edges) with focus state cleared (no node auto-selected unless first-load root edit rules apply).
 12. **Given** I am on the Editing Canvas with unsaved (debounced, not yet flushed) changes, **When** I attempt to navigate back to the Map Library, **Then** I am warned about pending unsaved changes and may choose to (a) stay and wait, or (b) discard navigation (future enhancement: force save) before the view actually changes.
 13. **Given** I am on the Editing Canvas, **When** I invoke a "Back to Library" control, **Then** the canvas UI is replaced by the Map Library list; no residual nodes or edges remain visible and performance state (pan/zoom) is reset upon returning to the same map later.
@@ -85,6 +88,9 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - Deleting a mind-map currently open should require confirmation and result in closed canvas state.
  - Navigating away from the Editing Canvas to the Map Library while an edit is in progress should respect unsaved-change warnings (FR-030) same as browser navigation.
  - Rapidly opening and closing maps (Library -> Canvas -> Library) should not retain stale pan/zoom transforms across different maps (each map view starts at its own stored or default viewport).
+ - Theme switching should not alter persisted graph structural data (pure presentation concern); only a user setting is updated.
+ - Subtle theme MUST still meet minimum accessibility contrast (WCAG AA for node text vs background >= 4.5:1 for normal text) despite reduced prominence.
+ - The Theme Manager placement inside the Details pane MUST visually separate global controls (theme) from per‑graph fields using a divider, heading, or grouping label.
 
 ## Requirements *(mandatory)*
 
@@ -128,6 +134,12 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - **FR-033**: System MUST allow returning from the Editing Canvas to the Map Library via an explicit navigation control. Attempting this while unsaved debounced edits exist MUST trigger the unsaved changes warning (FR-030) prior to leaving.
 - **FR-034**: Map management actions (create, delete, rename) initiated in the Map Library MUST NOT mutate the currently open canvas state unless the user explicitly loads the affected map (e.g., deleting a different map leaves current canvas unchanged).
 - **FR-035**: Each time a map is (re)opened into the Editing Canvas, the viewport (pan/zoom) SHOULD restore to the last persisted viewport for that map (if stored) or default to a centered origin; switching between maps MUST NOT leak viewport state between them.
+- **FR-036**: System MUST provide a Theme Manager control accessible from the existing Details pane allowing the user to choose among available UI themes.
+- **FR-037**: System MUST define a themes configuration with at least two built-in themes: "classic" (current default styling) and "subtle". Each theme defines: node background color, node border color & width, node text color, handle colors (source/target), selection outline style, and editor (textarea) background/text styles.
+- **FR-038**: The "subtle" theme MUST use thinner visual chrome (e.g., 1px borders vs thicker/outlined accents) and subdued, lower-saturation colors while maintaining required accessibility contrast (node text contrast >=4.5:1). Handle colors MAY be less saturated but must remain distinct for source vs target.
+- **FR-039**: Theme selection MUST persist globally (applies to all maps) across sessions; the active theme MUST load prior to initial canvas render to avoid a flash of incorrect theme (FOIT/FOUT equivalent). Persistence stored in user settings (not per graph) to avoid duplication.
+- **FR-040**: Switching the active theme MUST immediately re-render all nodes and the edit textarea without requiring reload; existing graph data MUST remain unchanged (presentation only). Theme change MUST emit a `theme:changed` event including previousTheme and newTheme.
+- **FR-040a**: The Theme Manager UI MUST visually denote its scope as global (e.g., heading "Global Theme" or badge) and MUST NOT appear intermingled inline with graph metadata fields without a separator.
 
 Assumptions incorporated from clarifications; remaining open items limited to performance metric formalization and future shortcut design.
 
@@ -150,6 +162,8 @@ interpreting them as bidirectional. Avoids early complexity (arrowheads, reversa
 #### Remaining Clarifications (Deferred to Planning)
 - Formal performance benchmarks (frame timing instrumentation methodology) to be codified before implementation tasks.
 - Potential future enhancements: keyboard shortcuts, directed edges toggle, multi-device sync.
+ - Theme scoping rationale: Chosen as global (user-level) for MVP (FR-039). Per-graph theme override deferred; would require additional field on Graph entity and conflicts with consistent mental model across maps.
+   - Details pane integration rationale: Consolidates secondary controls; visual separation (FR-040a) mitigates ambiguity about scope.
 
 ---
 

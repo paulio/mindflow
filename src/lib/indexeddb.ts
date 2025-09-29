@@ -146,3 +146,17 @@ export async function updateGraphMeta(graphId: string, patch: Partial<Pick<Graph
   graph.lastModified = nowIso();
   await db.put('graphs', graph);
 }
+
+// Global user settings (key/value) convenience
+interface SettingRecord { key: string; value: any }
+
+export async function getSetting<T=unknown>(key: string): Promise<T | undefined> {
+  const db = await initDB();
+  const rec = await db.get('settings', key) as SettingRecord | undefined;
+  return rec?.value as T | undefined;
+}
+
+export async function setSetting<T=unknown>(key: string, value: T): Promise<void> {
+  const db = await initDB();
+  await db.put('settings', { key, value });
+}

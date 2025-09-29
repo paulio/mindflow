@@ -15,6 +15,7 @@
 | autosave:failure | { entityType, attempt, error } | On failed write | Triggers retry/backoff |
 | undo:applied | { actionType } | Undo operation | Rebuilds graph state |
 | redo:applied | { actionType } | Redo operation | Rebuilds graph state |
+| theme:changed | { previousTheme, newTheme, ts } | After user switches theme (post application) | previousTheme nullable on first initialization |
 
 ## Event Ordering
 - Node/edge events MUST NOT fire before persistence success to avoid phantom state.

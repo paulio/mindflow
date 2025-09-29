@@ -19,6 +19,8 @@
 - [X] T009 [P] Contract test persistence schema validation (`tests/contract/persistence-schema.test.ts`) – validate sample serialized graph matches `persistence-schema.json`
 - [X] T010 [P] Contract test serialization ordering (`tests/contract/serialization-order.test.ts`) – ensure nodes & edges sorted per contract
 - [X] T011 [P] Contract test events emission shape (`tests/contract/events-contract.test.ts`) – mock emitter verifies required payload keys
+ - [ ] T088 [P] Contract test theme:changed event schema (`tests/contract/theme-event-contract.test.ts`) – ensure payload includes previousTheme (nullable), newTheme (required), timestamp
+ - [ ] T089 [P] Contract test theme definitions completeness (`tests/contract/themes-config.test.ts`) – assert each theme exports required semantic keys (nodeBg,nodeBorderColor,nodeBorderWidth,nodeTextColor,handleSourceColor,handleTargetColor,selectionOutline,editorBg,editorTextColor)
 
 ### Integration Tests (User Scenarios & Validation Checklist)
 - [X] T012 [P] Integration test create first node & autosave (`tests/integration/create-first-node.spec.ts`)
@@ -41,6 +43,10 @@
  - [ ] T075 [P] Integration test unsaved change warning on navigating back (modify text then attempt back) (FR-030, FR-033) (`tests/integration/library-unsaved-warning.spec.ts`)
  - [ ] T076 [P] Integration test creating new map from Library transitions + root node focused + appears in list after initial autosave (FR-001a, FR-031, FR-032, FR-034) (`tests/integration/library-new-map.spec.ts`)
  - [ ] T077 [P] Integration test per-map viewport isolation & restoration (different pans across two maps restore correctly) (FR-035) (`tests/integration/viewport-restore.spec.ts`)
+ - [ ] T090 [P] Integration test theme switch immediate visual update (<100ms, same frame) (FR-040) (`tests/integration/theme-switch-live.spec.ts`)
+ - [ ] T091 [P] Integration test theme persistence across reload (apply before first paint; no flash) (FR-039) (`tests/integration/theme-persist-reload.spec.ts`)
+ - [ ] T092 [P] Integration test Details pane shows Global Theme section separated from graph metadata (FR-040a) (`tests/integration/theme-ui-separation.spec.ts`)
+ - [ ] T093 [P] Integration test subtle theme maintains accessibility contrast (computed style ratio >=4.5:1) (FR-038) (`tests/integration/theme-contrast.spec.ts`)
 
 ### Unit / Component Tests (Early Core Logic Without Implementation)
 - [X] T021 [P] Unit test graph ID + node/edge uniqueness utilities (`tests/unit/graph-ids.test.ts`)
@@ -52,6 +58,10 @@
  - [ ] T070 [P] Unit test moveNode single persistence event after drag stop (`tests/unit/move-node.test.ts`)
  - [ ] T078 [P] Unit test viewport persistence serialize/restore logic (FR-035) (`tests/unit/viewport-persistence.test.ts`)
  - [ ] T079 [P] Unit test library isolation (operations on non-active maps do not mutate active canvas) (FR-034) (`tests/unit/library-isolation.test.ts`)
+ - [ ] T094 [P] Unit test theme persistence loader fallback to default on invalid stored key (`tests/unit/theme-fallback.test.ts`)
+ - [ ] T095 [P] Unit test subtle theme contrast ratio calculation >=4.5 (config-level) (`tests/unit/theme-contrast-config.test.ts`)
+ - [ ] T096 [P] Unit test theme:changed event emission on switch (`tests/unit/theme-event.test.ts`)
+ - [ ] T097 [P] Unit test CSS variable mapping completeness (all semantic keys map to vars) (`tests/unit/theme-css-vars.test.ts`)
 
 ## Phase 3.3: Core Implementation (ONLY after above tests are added & failing)
 - [X] T025 Implement persistence layer IndexedDB adapter `src/lib/indexeddb.ts` (init stores, CRUD, batch writes)
@@ -81,6 +91,13 @@
  - [ ] T083 Enforce non-destructive library operations (create/rename/delete isolated until map loaded) (FR-034)
  - [ ] T084 Persist & restore per-map viewport (pan/zoom) (FR-035)
  - [ ] T085 Reset selection & editing state cleanly on map switch (FR-032)
+ - [ ] T098 Implement theme definitions module `src/lib/themes.ts` (classic + subtle) (FR-037, FR-038)
+ - [ ] T099 Refactor tokens/colors to semantic CSS variables under theme root classes (FR-036, FR-037)
+ - [ ] T100 Implement theme persistence (settings store read/write) with preload before first paint (FR-039)
+ - [ ] T101 Implement global theme provider / store & event emission `theme:changed` (FR-040)
+ - [ ] T102 Implement Theme Manager UI in Details pane with visual separation header "Global Theme" (FR-036, FR-040a)
+ - [ ] T103 Implement fallback invalid stored theme key -> default + warning (FR-039)
+ - [ ] T104 Add performance metric capture for theme switch duration (FR-040)
 
 ## Phase 3.4: Integration
 - [ ] T042 Integrate autosave + event bus into GraphCanvas lifecycle
@@ -105,6 +122,9 @@
  - [ ] T072 Update serialization contract to note newline characters in node text
  - [ ] T086 Update quickstart/docs to describe Library vs Canvas separation & navigation (FR-031..FR-035)
  - [ ] T087 Add manual validation checklist entries for Library ↔ Canvas transitions & viewport restore
+ - [ ] T105 Update quickstart/docs for Theme Manager usage & global scope labeling (FR-036..FR-040a)
+ - [ ] T106 Add manual validation checklist entries for theme switching, persistence, accessibility contrast
+ - [ ] T107 Extend performance overlay to display last theme switch timing metric
 
 ## Dependencies
 - Setup (T001-T008) before tests.
@@ -120,6 +140,10 @@
  - Library separation integration tests (T073-T077) must be authored & failing before implementing T080-T085.
  - Viewport persistence unit test (T078) precedes implementation task T084.
  - Library isolation unit test (T079) precedes implementation task T083.
+ - Theme contract & config tests (T088-T089) MUST precede theme implementation tasks (T098+).
+ - Theme integration tests (T090-T093) MUST precede implementation tasks (T098+).
+ - Theme unit tests (T094-T097) MUST precede implementation tasks (T098+).
+ - Theme implementation ordering: T098 (definitions) → T099 (CSS vars) → T100 (persistence preload) → T101 (provider & events) → T102 (UI) → T103 (fallback) → T104 (performance metric). Docs/polish (T105-T107) after successful integration tests pass.
 
 ## Parallel Execution Examples
 ```

@@ -9,10 +9,10 @@ export const ThoughtEdge: React.FC<EdgeProps> = (props) => {
 
   return (
     <g data-edge-id={id}>
-      {/* Outer halo for visibility */}
-  <BaseEdge path={path} style={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 12 }} />
+      {/* Outer halo for visibility (can shrink in subtle theme) */}
+      <BaseEdge path={path} style={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 'var(--mf-edge-halo-width, 12)' }} />
       {/* Core line */}
-  <BaseEdge path={path} markerEnd={markerEnd} style={{ stroke: selected ? '#ffb347' : '#4da3ff', strokeWidth: 4 }} />
+      <BaseEdge path={path} markerEnd={markerEnd} style={{ stroke: selected ? 'var(--mf-handle-source)' : 'var(--mf-handle-target)', strokeWidth: 'var(--mf-edge-core-width, 4)' }} />
     </g>
   );
 };
