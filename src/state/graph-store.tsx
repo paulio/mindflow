@@ -15,6 +15,7 @@ interface GraphContext extends GraphState {
   addEdge(source: string, target: string): void;
   addConnectedNode(sourceNodeId: string, x: number, y: number): NodeRecord | null; // atomic node+edge
   updateNodeText(nodeId: string, text: string): void;
+  moveNode(nodeId: string, x: number, y: number): void;
   // Centralized edit focus management so ReactFlow re-renders do not lose edit mode when selection changes.
   editingNodeId: string | null;
   startEditing(nodeId: string): void;
@@ -80,10 +81,20 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const addEdge = useCallback((source: string, target: string) => {
     if (!graph) return;
-    const e = createEdge({ graphId: graph.id, sourceNodeId: source, targetNodeId: target });
-    setEdges(es => [...es, e]);
-    events.emit('edge:created', { graphId: graph.id, edgeId: e.id });
-    saveEdges(graph.id, [e]);
+    if (source === target) return; // no self edges
+    // Prevent duplicate edge (same direction) creation
+    let exists = false;
+    setEdges(es => {
+      if (es.some(edge => edge.sourceNodeId === source && edge.targetNodeId === target)) { exists = true; return es; }
+      const e = createEdge({ graphId: graph.id, sourceNodeId: source, targetNodeId: target });
+      // Fire side-effects outside setState function to keep it pure-ish
+      setTimeout(() => {
+        events.emit('edge:created', { graphId: graph.id, edgeId: e.id });
+        saveEdges(graph.id, [e]);
+      }, 0);
+      return [...es, e];
+    });
+    if (exists) return;
   }, [graph]);
 
   // Atomic creation: if edge creation fails, node is not persisted.
@@ -95,6 +106,9 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const edge = createEdge({ graphId: graph.id, sourceNodeId, targetNodeId: created.id });
       setNodes(ns => [...ns, created!]);
       setEdges(es => [...es, edge]);
+      // Debug visibility: log creation so we can confirm in browser console.
+      // eslint-disable-next-line no-console
+      console.debug('[graph-store] addConnectedNode created node+edge', { node: created.id, edge: edge.id, sourceNodeId, targetNodeId: created.id });
       events.emit('node:created', { graphId: graph.id, nodeId: created.id });
       events.emit('edge:created', { graphId: graph.id, edgeId: edge.id });
       void saveNodes(graph.id, [created]);
@@ -120,13 +134,27 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [graph]);
 
+  const moveNode = useCallback((nodeId: string, x: number, y: number) => {
+    if (!graph) return;
+    let moved: NodeRecord | null = null;
+    setNodes(ns => ns.map(n => {
+      if (n.id === nodeId) { moved = { ...n, x: Math.round(x), y: Math.round(y), lastModified: new Date().toISOString() }; return moved; }
+      return n;
+    }));
+    const m = moved as NodeRecord | null;
+    if (m) {
+      void saveNodes(graph.id, [m]);
+      events.emit('node:moved', { graphId: graph.id, nodeId, x: m.x, y: m.y });
+    }
+  }, [graph]);
+
   const startEditing = useCallback((nodeId: string) => { setEditingNodeId(nodeId); }, []);
   const stopEditing = useCallback(() => { setEditingNodeId(null); }, []);
 
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, newGraph, selectGraph, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, editingNodeId, startEditing, stopEditing }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, newGraph, selectGraph, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, editingNodeId, startEditing, stopEditing }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {
