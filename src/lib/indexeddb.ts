@@ -50,7 +50,8 @@ export async function createGraph(name: string, opts?: { autoLoadLast?: boolean 
     lastModified: ts,
     lastOpened: ts,
     schemaVersion: 1,
-    settings: { autoLoadLast: opts?.autoLoadLast ?? true }
+    settings: { autoLoadLast: opts?.autoLoadLast ?? true },
+    viewport: { x: 0, y: 0, zoom: 1 }
   };
   await db.put('graphs', record);
   return record;
@@ -135,12 +136,13 @@ async function* iterateCursor(index: any, key: IDBValidKey) {
   }
 }
 
-export async function updateGraphMeta(graphId: string, patch: Partial<Pick<GraphRecord,'name'|'settings'>>) {
+export async function updateGraphMeta(graphId: string, patch: Partial<Pick<GraphRecord,'name'|'settings'|'viewport'>>) {
   const db = await initDB();
   const graph = await db.get('graphs', graphId) as GraphRecord | undefined;
   if (!graph) return;
   if (patch.name) graph.name = patch.name.slice(0,80);
   if (patch.settings) graph.settings = { ...graph.settings, ...patch.settings };
+  if (patch.viewport) graph.viewport = { ...graph.viewport, ...patch.viewport } as any;
   graph.lastModified = nowIso();
   await db.put('graphs', graph);
 }

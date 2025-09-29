@@ -6,6 +6,7 @@ export interface GraphRecord {
   lastOpened: string; // ISO
   schemaVersion: number; // >=1
   settings?: { autoLoadLast?: boolean };
+  viewport?: { x: number; y: number; zoom: number }; // canvas transform persisted per map (FR-035)
 }
 
 export interface NodeRecord {

@@ -4,11 +4,10 @@ export default defineConfig({
   test: {
     // Include both .ts and .tsx so component tests are discovered
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
-    // Exclude only the old placeholder integration specs (keep new RTL integration tests runnable)
+    // Exclude all Playwright integration specs (run via `npm run test:ui`). Keep RTL/unit specs.
     exclude: [
-      'tests/integration/dblclick-edit.spec.ts',
-      'tests/integration/edit-commit.spec.ts',
-      'tests/integration/edit-idempotent.spec.ts'
+      'tests/integration/**/*.spec.ts',
+      'tests/integration/**/*.spec.tsx'
     ],
     globals: true,
     // Use jsdom for React component rendering

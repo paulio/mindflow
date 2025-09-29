@@ -15,6 +15,7 @@ describe('Multi-line length enforcement (255 including newlines)', () => {
     const withNewlines = base + '\nXYZ'; // length 254
     const result = enforceLimit(withNewlines + '1234'); // would exceed
     expect(result.length).toBe(255);
-    expect(result.endsWith('3')).toBe(true); // truncated after reaching limit
+    // slice(0,255) keeps only the first character ('1') from the appended '1234'
+    expect(result.endsWith('1')).toBe(true);
   });
 });

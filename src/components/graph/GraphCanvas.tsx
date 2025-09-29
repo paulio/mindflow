@@ -27,7 +27,7 @@ const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
 };
 
 export const GraphCanvas: React.FC = () => {
-  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addNode } = useGraph();
+  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addNode, graph, updateViewport } = useGraph();
   // Local React Flow controlled nodes (decoupled from store during drag for stability)
   const [flowNodes, setFlowNodes] = useState<any[]>([]);
   // Initialize / merge store nodes into local state (add new, update labels). Positions updated when not currently dragging.
@@ -46,6 +46,13 @@ export const GraphCanvas: React.FC = () => {
     });
   }, [nodes]);
   const rfInstance = useReactFlow();
+  useEffect(() => {
+    if (graph?.viewport) {
+      const { x, y, zoom } = graph.viewport;
+      try { rfInstance.setViewport({ x, y, zoom }, { duration: 0 }); } catch { /* ignore */ }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph?.id]);
   // Track the start of a connection drag so we can create a node if released on pane.
   const connectStartRef = useRef<{ nodeId: string; handleId?: string; startClientX: number; startClientY: number } | null>(null);
 
@@ -164,6 +171,7 @@ export const GraphCanvas: React.FC = () => {
         }}
         defaultEdgeOptions={{ type: 'thought-edge', style: { pointerEvents: 'none' } }}
         style={{ background: '#0d0f17' }}
+        onMoveEnd={(_, viewport) => { updateViewport(viewport.x, viewport.y, viewport.zoom); }}
       >
         <Background />
         <Controls />
@@ -171,3 +179,6 @@ export const GraphCanvas: React.FC = () => {
     </div>
   );
 };
+// Restore viewport when graph (map) changes
+// We place the effect after component body definition to access rfInstance via hook (so we convert to inline effect above) - but rfInstance is inside component earlier; add effect there.
+

@@ -4,11 +4,13 @@ import { createNode, createEdge } from '../lib/graph-domain';
 import { NodeRecord, EdgeRecord, GraphRecord } from '../lib/types';
 import { events } from '../lib/events';
 
-interface GraphState { graph: GraphRecord | null; nodes: NodeRecord[]; edges: EdgeRecord[]; graphs: GraphRecord[]; }
+type ViewMode = 'library' | 'canvas';
+interface GraphState { graph: GraphRecord | null; nodes: NodeRecord[]; edges: EdgeRecord[]; graphs: GraphRecord[]; view: ViewMode; }
 
 interface GraphContext extends GraphState {
   newGraph(): Promise<void>;
   selectGraph(id: string): Promise<void>;
+  openLibrary(): void;
   renameGraph(name: string): Promise<void>;
   removeGraph(id: string): Promise<void>;
   addNode(x: number, y: number): NodeRecord | null;
@@ -16,12 +18,14 @@ interface GraphContext extends GraphState {
   addConnectedNode(sourceNodeId: string, x: number, y: number, sourceHandleId?: string, targetHandleId?: string): NodeRecord | null; // atomic node+edge with directional handle metadata
   updateNodeText(nodeId: string, text: string): void;
   moveNode(nodeId: string, x: number, y: number): void;
+  updateViewport(x: number, y: number, zoom: number): void;
   // Ephemeral position update during drag (no persistence, no lastModified update)
   setNodePositionEphemeral(nodeId: string, x: number, y: number): void;
   // Centralized edit focus management so ReactFlow re-renders do not lose edit mode when selection changes.
   editingNodeId: string | null;
   startEditing(nodeId: string): void;
   stopEditing(): void;
+  pendingChanges: boolean; // coarse indicator for unsaved changes (future: integrate with autosave scheduler)
 }
 
 const Ctx = createContext<GraphContext | null>(null);
@@ -32,6 +36,8 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [edges, setEdges] = useState<EdgeRecord[]>([]);
   const [graphs, setGraphs] = useState<GraphRecord[]>([]);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [view, setView] = useState<ViewMode>('library');
+  const [pendingChanges, setPendingChanges] = useState<boolean>(false); // placeholder (would toggle on edits & clear on autosave success)
 
   async function refreshList() { setGraphs(await listGraphs()); }
 
@@ -46,6 +52,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     events.emit('node:created', { graphId: g.id, nodeId: root.id });
   void saveNodes(g.id, [root]);
     await refreshList();
+    setView('canvas');
   }, []);
 
   const selectGraph = useCallback(async (id: string) => {
@@ -55,8 +62,19 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setNodes(snap.nodes);
       setEdges(snap.edges);
       events.emit('graph:loaded', { graphId: snap.graph.id });
+      setView('canvas');
     }
   }, []);
+
+  const openLibrary = useCallback(() => {
+    // Guard: if editing in progress warn
+    if (editingNodeId) {
+      const proceed = window.confirm('You have an edit in progress. Leave and discard focus?');
+      if (!proceed) return;
+      setEditingNodeId(null);
+    }
+    setView('library');
+  }, [editingNodeId]);
 
   const renameGraph = useCallback(async (name: string) => {
     if (!graph) return;
@@ -152,6 +170,13 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [graph]);
 
+  const updateViewport = useCallback((x: number, y: number, zoom: number) => {
+    if (!graph) return;
+    setGraph(g => g ? { ...g, viewport: { x, y, zoom } } : g);
+    // persist asynchronously (non-blocking)
+    updateGraphMeta(graph.id, { viewport: { x, y, zoom } }).catch(()=>{});
+  }, [graph]);
+
   const setNodePositionEphemeral = useCallback((nodeId: string, x: number, y: number) => {
     if (!graph) return;
     setNodes(ns => ns.map(n => n.id === nodeId ? { ...n, x: Math.round(x), y: Math.round(y) } : n));
@@ -163,7 +188,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, newGraph, selectGraph, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, setNodePositionEphemeral, editingNodeId, startEditing, stopEditing }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, updateViewport, setNodePositionEphemeral, editingNodeId, startEditing, stopEditing, pendingChanges }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

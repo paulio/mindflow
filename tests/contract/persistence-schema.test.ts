@@ -12,7 +12,8 @@ describe('Persistence Schema Contract', () => {
     const sample = {
       graph: {
         id: 'g1', name: 'Test', created: new Date().toISOString(), lastModified: new Date().toISOString(), lastOpened: new Date().toISOString(), schemaVersion: 1,
-        settings: { autoLoadLast: true }
+        settings: { autoLoadLast: true },
+        viewport: { x: 0, y: 0, zoom: 1 }
       },
       nodes: [],
       edges: []

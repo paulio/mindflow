@@ -21,6 +21,16 @@
             "autoLoadLast": {"type": "boolean"}
           },
           "additionalProperties": false
+        },
+        "viewport": {
+          "type": "object",
+          "properties": {
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+            "zoom": {"type": "number", "minimum": 0.05, "maximum": 10}
+          },
+          "required": ["x","y","zoom"],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

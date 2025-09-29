@@ -36,6 +36,11 @@
  - [ ] T066 [P] Integration test Shift+Enter inserts newline, remains editing, later Enter commits multi-line (FR-005c) (`tests/integration/multiline-edit.spec.ts`)
  - [ ] T067 [P] Integration test node reposition drag persists final position & edges update (FR-025) (`tests/integration/reposition-node.spec.ts`)
  - [ ] T068 [P] Integration test <80px connection drag cancels node creation (FR-020) (`tests/integration/drag-threshold-cancel.spec.ts`)
+ - [ ] T073 [P] Integration test Library lists existing maps & selecting one transitions to canvas (FR-031, FR-032) (`tests/integration/library-open-map.spec.ts`)
+ - [ ] T074 [P] Integration test Back to Library hides canvas & shows list (FR-033) (`tests/integration/library-back.spec.ts`)
+ - [ ] T075 [P] Integration test unsaved change warning on navigating back (modify text then attempt back) (FR-030, FR-033) (`tests/integration/library-unsaved-warning.spec.ts`)
+ - [ ] T076 [P] Integration test creating new map from Library transitions + root node focused + appears in list after initial autosave (FR-001a, FR-031, FR-032, FR-034) (`tests/integration/library-new-map.spec.ts`)
+ - [ ] T077 [P] Integration test per-map viewport isolation & restoration (different pans across two maps restore correctly) (FR-035) (`tests/integration/viewport-restore.spec.ts`)
 
 ### Unit / Component Tests (Early Core Logic Without Implementation)
 - [X] T021 [P] Unit test graph ID + node/edge uniqueness utilities (`tests/unit/graph-ids.test.ts`)
@@ -45,6 +50,8 @@
  - [ ] T060 [P] Unit test atomic node+edge creation invariant (simulate edge failure -> rollback node) (`tests/unit/atomic-node-edge.test.ts`)
  - [ ] T069 [P] Unit test multi-line length limit (255 total incl newlines) (`tests/unit/multiline-length.test.ts`)
  - [ ] T070 [P] Unit test moveNode single persistence event after drag stop (`tests/unit/move-node.test.ts`)
+ - [ ] T078 [P] Unit test viewport persistence serialize/restore logic (FR-035) (`tests/unit/viewport-persistence.test.ts`)
+ - [ ] T079 [P] Unit test library isolation (operations on non-active maps do not mutate active canvas) (FR-034) (`tests/unit/library-isolation.test.ts`)
 
 ## Phase 3.3: Core Implementation (ONLY after above tests are added & failing)
 - [X] T025 Implement persistence layer IndexedDB adapter `src/lib/indexeddb.ts` (init stores, CRUD, batch writes)
@@ -68,6 +75,12 @@
  - [ ] T062 Implement commit handling (Enter/blur) plain Enter commits; optional Escape cancel (FR-005b)
  - [ ] T064 Replace single-line input with auto-resizing textarea; Shift+Enter newline insertion (FR-005c)
  - [ ] T065 Auto-resize node container for multi-line text (max height or scroll strategy)
+ - [ ] T080 Implement dedicated Map Library view component (replaces in-canvas list) (FR-031)
+ - [ ] T081 Implement navigation control (Back to Library) + unsaved-change guard (FR-033, FR-030)
+ - [ ] T082 Implement new map creation flow from Library (transition + root focus) (FR-001a, FR-032)
+ - [ ] T083 Enforce non-destructive library operations (create/rename/delete isolated until map loaded) (FR-034)
+ - [ ] T084 Persist & restore per-map viewport (pan/zoom) (FR-035)
+ - [ ] T085 Reset selection & editing state cleanly on map switch (FR-032)
 
 ## Phase 3.4: Integration
 - [ ] T042 Integrate autosave + event bus into GraphCanvas lifecycle
@@ -90,6 +103,8 @@
  - [ ] T063 Update quickstart & user help to document double‑click editing `/specs/001-build-an-application/quickstart.md`
  - [ ] T071 Update quickstart/docs for multi-line editing (Shift+Enter) & reposition drag
  - [ ] T072 Update serialization contract to note newline characters in node text
+ - [ ] T086 Update quickstart/docs to describe Library vs Canvas separation & navigation (FR-031..FR-035)
+ - [ ] T087 Add manual validation checklist entries for Library ↔ Canvas transitions & viewport restore
 
 ## Dependencies
 - Setup (T001-T008) before tests.
@@ -102,6 +117,9 @@
 - Polish tasks (T049+) after integration stable.
  - Edit-related integration tests (T057-T059, T066-T068) precede implementation enhancements (T061-T065) per TDD.
  - Atomic invariant unit test (T060) precedes any refactors to creation flow.
+ - Library separation integration tests (T073-T077) must be authored & failing before implementing T080-T085.
+ - Viewport persistence unit test (T078) precedes implementation task T084.
+ - Library isolation unit test (T079) precedes implementation task T083.
 
 ## Parallel Execution Examples
 ```

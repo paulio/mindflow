@@ -69,6 +69,10 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 8. **Given** a graph with many nodes, **When** I pan or zoom the canvas, **Then** node positions and edge routes remain visually consistent and no data loss occurs.
 9. **Given** a saved map, **When** I refresh the browser/app, **Then** the last opened graph auto-loads automatically without prompting.
 10. **Given** a node displayed on the canvas, **When** I single‑click to select it and then drag its body (mouse/touch drag), **Then** the node follows the pointer continuously, all connected edges update their geometry in real time, and on release the new position is persisted.
+11. **Given** I am viewing the Map Library (map list view) showing previously saved mind-maps, **When** I click a map entry, **Then** I transition to the dedicated Editing Canvas view and that map loads (nodes + edges) with focus state cleared (no node auto-selected unless first-load root edit rules apply).
+12. **Given** I am on the Editing Canvas with unsaved (debounced, not yet flushed) changes, **When** I attempt to navigate back to the Map Library, **Then** I am warned about pending unsaved changes and may choose to (a) stay and wait, or (b) discard navigation (future enhancement: force save) before the view actually changes.
+13. **Given** I am on the Editing Canvas, **When** I invoke a "Back to Library" control, **Then** the canvas UI is replaced by the Map Library list; no residual nodes or edges remain visible and performance state (pan/zoom) is reset upon returning to the same map later.
+14. **Given** I create a new map from the Map Library via a "New Map" action, **Then** the library immediately transitions to the Editing Canvas with the freshly created root node focused (Scenario 1), and the new map appears in the library list only after initial auto-save completes.
 
 ### Edge Cases
 - Creating many nodes rapidly (drag spamming) should not produce orphan edges or duplicate node IDs.
@@ -79,6 +83,8 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - Multi-tab editing is out of scope; last-writer-wins conflicts are not handled.
 - Large graph performance (>500 nodes) must remain usable; pan/zoom + node drag still responsive (provisional target: avg frame <40ms, p95 <80ms) – refine during performance planning.
 - Deleting a mind-map currently open should require confirmation and result in closed canvas state.
+ - Navigating away from the Editing Canvas to the Map Library while an edit is in progress should respect unsaved-change warnings (FR-030) same as browser navigation.
+ - Rapidly opening and closing maps (Library -> Canvas -> Library) should not retain stale pan/zoom transforms across different maps (each map view starts at its own stored or default viewport).
 
 ## Requirements *(mandatory)*
 
@@ -117,6 +123,11 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - **FR-028**: System MUST provide visual focus / selection state for exactly one node (or none) at a time.
 - **FR-029**: System MUST ensure persisted graphs are versioned with schemaVersion starting at 1.
 - **FR-030**: System SHOULD warn user before navigating away if unsaved changes pending (if auto-save delay still active).
+- **FR-031**: System MUST provide a distinct Map Library view ("map file UI") separate from the Editing Canvas. The Map Library lists existing mind-maps and offers create, select (load), delete, and rename actions; it MUST NOT display the active graph's interactive nodes/edges.
+- **FR-032**: System MUST ensure that loading (opening) a map transitions the user from the Map Library view to the Editing Canvas view dedicated to that single map. While in the Editing Canvas, library list elements (except a single navigation control) MUST be hidden to reduce distraction.
+- **FR-033**: System MUST allow returning from the Editing Canvas to the Map Library via an explicit navigation control. Attempting this while unsaved debounced edits exist MUST trigger the unsaved changes warning (FR-030) prior to leaving.
+- **FR-034**: Map management actions (create, delete, rename) initiated in the Map Library MUST NOT mutate the currently open canvas state unless the user explicitly loads the affected map (e.g., deleting a different map leaves current canvas unchanged).
+- **FR-035**: Each time a map is (re)opened into the Editing Canvas, the viewport (pan/zoom) SHOULD restore to the last persisted viewport for that map (if stored) or default to a centered origin; switching between maps MUST NOT leak viewport state between them.
 
 Assumptions incorporated from clarifications; remaining open items limited to performance metric formalization and future shortcut design.
 

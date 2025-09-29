@@ -2,22 +2,21 @@ import React from 'react';
 import { GraphProvider, useGraph } from '../state/graph-store';
 import { ReactFlowProvider } from 'reactflow';
 import { GraphCanvas } from '../components/graph/GraphCanvas';
-import { GraphListPanel } from '../components/panels/GraphListPanel';
 import { GraphMetaPanel } from '../components/panels/GraphMetaPanel';
 import { PerfOverlay } from '../components/ui/PerfOverlay';
 import { UndoRedoBar } from '../components/ui/UndoRedoBar';
 import { SaveStatus } from '../components/ui/SaveStatus';
+import { MapLibrary } from '../components/pages/MapLibrary';
 
-const Canvas: React.FC = () => {
-  const { graph, newGraph } = useGraph();
+const CanvasView: React.FC = () => {
+  const { graph, openLibrary } = useGraph();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <header style={{ padding: '4px 12px', borderBottom: '1px solid #222', display: 'flex', gap: 8 }}>
-        <strong>Mindflow</strong>
-        {!graph && <button onClick={() => newGraph()}>New Map</button>}
+      <header style={{ padding: '4px 12px', borderBottom: '1px solid #222', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button onClick={openLibrary} style={{ background: '#222', color: '#eee', border: '1px solid #333', padding: '2px 8px', cursor: 'pointer' }}>← Library</button>
+        <strong style={{ flex: 1 }}>{graph?.name || 'Untitled'}</strong>
       </header>
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <GraphListPanel />
         <GraphCanvas />
         <GraphMetaPanel />
       </div>
@@ -28,10 +27,15 @@ const Canvas: React.FC = () => {
   );
 };
 
+const RootView: React.FC = () => {
+  const { view } = useGraph();
+  return view === 'library' ? <MapLibrary /> : <CanvasView />;
+};
+
 const App: React.FC = () => (
   <GraphProvider>
     <ReactFlowProvider>
-      <Canvas />
+      <RootView />
     </ReactFlowProvider>
   </GraphProvider>
 );

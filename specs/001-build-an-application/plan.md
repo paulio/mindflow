@@ -44,6 +44,9 @@ and accessibility targets derived from constitution and preliminary assumptions.
 4. Added Acceptance Scenario #10 covering reposition drag workflow.
 5. Directional node creation continues to rely on N/S/E/W handles, but implementation strategy updated to use native React Flow connection drag (onConnectStart/onConnectEnd) instead of a custom overlay component.
 6. Added FR-005c + Acceptance Scenario #5: Shift+Enter inserts newline (multi-line node text), editor remains active; FR-019 updated to clarify 255 char limit applies across all lines including newline characters.
+7. Added Acceptance Scenarios #11–#14 introducing explicit separation between a Map Library (list of saved maps) and the Editing Canvas (single active map context) with navigation, transition, and state reset semantics.
+8. Added FR-031..FR-035 defining: dedicated Library view (FR-031), explicit transition on load (FR-032), guarded back navigation with unsaved-change warning (FR-033 leveraging FR-030), non-destructive isolation of library operations from active canvas (FR-034), and per-map viewport persistence & restoration (FR-035).
+9. Edge Cases expanded: viewport isolation, unsaved-change guard on library navigation, rapid map switching without leaking pan/zoom transforms.
 
 Plan adjustments (delta):
 - Add integration test: reposition node (drag) updates position & edges live; persists after drop (FR-025 / Scenario #10).
@@ -58,6 +61,11 @@ Plan adjustments (delta):
 - Add unit test for text update enforcing max length across newlines (FR-019) and preserving newline characters in persistence serialization order.
 - Add integration test: editing a node, typing text, pressing Shift+Enter inserts newline (height increases), later pressing Enter commits both lines.
 - Update serialization contract doc if needed to clarify text may contain '\n'.
+ - Introduce view state architecture: two primary UI states (Library vs Canvas). Remove embedded GraphList panel from active canvas when editing; Library owns map management.
+ - Add integration tests (pre-implementation) for: Library → Canvas open, Back to Library, unsaved-change warning, new map creation flow, per-map viewport restore.
+ - Add unit tests: viewport persistence serialize/restore; library isolation (non-active map operations do not mutate current canvas).
+ - Implementation additions: Library view component, navigation control (Back), unsaved-change guard leveraging autosave pending state, per-map viewport storage (extend persistence schema), selection/edit state reset on map switch.
+ - Documentation updates: quickstart to differentiate “Managing Maps (Library)” vs “Editing a Map (Canvas)” and describe viewport restoration + warning dialog.
 
 ## Technical Context
 **Language/Version**: TypeScript (ES2022 target) via Vite + React 18
@@ -66,6 +74,7 @@ Plan adjustments (delta):
 **Testing**: Unit (Vitest), Component (RTL), Integration (Playwright), Performance smoke (custom script + PerformanceObserver), Accessibility (axe testing).
 **Target Platform**: Modern desktop browsers (Chromium, Firefox, Safari latest), PWA potential backlog.
 **Project Type**: Single web frontend (no backend service). All logic client-side.
+**View Architecture**: Two top-level application states: (1) Map Library (non-interactive list & management actions) and (2) Editing Canvas (ReactFlow graph for one active map). Transitions: Open Map, New Map (create→auto-transition), Back to Library. Each map persists its own viewport (pan, zoom level) alongside metadata and restores it on open; library operations on other maps leave the active canvas state untouched until an explicit load.
 **Performance Goals**: 500-node cold load <1500ms; warm load <500ms; autosave p95 <150ms; frame render avg <40ms p95 <80ms during pan/zoom.
 **Constraints**: Offline-capable; storage warning if >5MB; node text <=255 chars; undo depth 10; no multi-tab sync.
 **Scale/Scope**: MVP single-user local graphs; up to ~1000 nodes (no virtualization in MVP, performance monitoring instrumentation only).
