@@ -16,6 +16,8 @@ interface GraphContext extends GraphState {
   addConnectedNode(sourceNodeId: string, x: number, y: number, sourceHandleId?: string, targetHandleId?: string): NodeRecord | null; // atomic node+edge with directional handle metadata
   updateNodeText(nodeId: string, text: string): void;
   moveNode(nodeId: string, x: number, y: number): void;
+  // Ephemeral position update during drag (no persistence, no lastModified update)
+  setNodePositionEphemeral(nodeId: string, x: number, y: number): void;
   // Centralized edit focus management so ReactFlow re-renders do not lose edit mode when selection changes.
   editingNodeId: string | null;
   startEditing(nodeId: string): void;
@@ -150,13 +152,18 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [graph]);
 
+  const setNodePositionEphemeral = useCallback((nodeId: string, x: number, y: number) => {
+    if (!graph) return;
+    setNodes(ns => ns.map(n => n.id === nodeId ? { ...n, x: Math.round(x), y: Math.round(y) } : n));
+  }, [graph]);
+
   const startEditing = useCallback((nodeId: string) => { setEditingNodeId(nodeId); }, []);
   const stopEditing = useCallback(() => { setEditingNodeId(null); }, []);
 
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, newGraph, selectGraph, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, editingNodeId, startEditing, stopEditing }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, newGraph, selectGraph, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, setNodePositionEphemeral, editingNodeId, startEditing, stopEditing }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

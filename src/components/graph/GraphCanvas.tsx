@@ -1,24 +1,23 @@
-import React, { useMemo } from 'react';
-import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, OnEdgesChange, Connection, Handle, Position } from 'reactflow';
+import React, { useMemo, useRef } from 'react';
+import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, OnEdgesChange, Connection, Handle, Position, OnConnectStart, OnConnectEnd, useReactFlow, ReactFlowProvider } from 'reactflow';
 import { ThoughtEdge } from './ThoughtEdge';
 import { useGraph } from '../../state/graph-store';
 import 'reactflow/dist/style.css';
 import { ThoughtNode } from '../nodes/ThoughtNode';
-import { NodeHandles } from '../nodes/NodeHandles';
+// Custom directional ghost/drag handles removed in favor of native React Flow connection UX.
 
 const handleStyle: React.CSSProperties = { width: 10, height: 10, border: '2px solid #0d0f17', background: '#555', zIndex: 1 };
 const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
-  const { id, selected, xPos, yPos, data } = props as any; // xPos/yPos provided by ReactFlow
+  const { id, data } = props as any;
   return (
     <div style={{ position: 'relative' }}>
       <ThoughtNode id={id} text={data.label} />
-      <NodeHandles nodeId={id} baseX={xPos} baseY={yPos} visible={!!selected} />
-      {/* Four directional source handles */}
+      {/* Directional source handles */}
       <Handle type="source" id="n" position={Position.Top} style={{ ...handleStyle, background: '#4da3ff' }} />
       <Handle type="source" id="e" position={Position.Right} style={{ ...handleStyle, background: '#4da3ff' }} />
       <Handle type="source" id="s" position={Position.Bottom} style={{ ...handleStyle, background: '#4da3ff' }} />
       <Handle type="source" id="w" position={Position.Left} style={{ ...handleStyle, background: '#4da3ff' }} />
-      {/* Four directional target handles */}
+      {/* Directional target handles */}
       <Handle type="target" id="n" position={Position.Top} style={{ ...handleStyle, background: '#ffb347' }} />
       <Handle type="target" id="e" position={Position.Right} style={{ ...handleStyle, background: '#ffb347' }} />
       <Handle type="target" id="s" position={Position.Bottom} style={{ ...handleStyle, background: '#ffb347' }} />
@@ -27,8 +26,13 @@ const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
   );
 };
 
-export const GraphCanvas: React.FC = () => {
-  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge } = useGraph();
+const InnerGraphCanvas: React.FC = () => {
+  const { nodes, edges, startEditing, editingNodeId, moveNode, setNodePositionEphemeral, addEdge, addNode } = useGraph();
+  const rfInstance = useReactFlow();
+  // Track the start of a connection drag so we can create a node if released on pane.
+  const connectStartRef = useRef<{ nodeId: string; handleId?: string; startClientX: number; startClientY: number } | null>(null);
+
+  const DRAG_THRESHOLD = 80; // px in flow space (after zoom scaling) consistent with earlier spec
   const rfNodes = useMemo(() => nodes.map((n: { id: string; x: number; y: number; text?: string }) => ({ id: n.id, type: 'thought', position: { x: n.x, y: n.y }, data: { label: n.text || 'New Thought' }, tabIndex: 0 })), [nodes]);
   const rfEdges = useMemo(
     () => edges.map((e: any) => ({
@@ -45,8 +49,12 @@ export const GraphCanvas: React.FC = () => {
   );
   const onNodesChange: OnNodesChange = (changes) => {
     for (const c of changes) {
-      if (c.type === 'position' && c.dragging === false && c.position) {
-        moveNode(c.id, c.position.x, c.position.y);
+      if (c.type === 'position' && c.position) {
+        if (c.dragging) {
+          setNodePositionEphemeral(c.id, c.position.x, c.position.y);
+        } else {
+          moveNode(c.id, c.position.x, c.position.y);
+        }
       }
     }
   };
@@ -54,6 +62,55 @@ export const GraphCanvas: React.FC = () => {
   const onConnect = (connection: Connection) => {
     if (connection.source && connection.target) {
       addEdge(connection.source, connection.target, connection.sourceHandle ?? undefined, connection.targetHandle ?? undefined);
+    }
+  };
+
+  const onConnectStart: OnConnectStart = (evt, params) => {
+    if (!params.nodeId) return;
+    let clientX = 0; let clientY = 0;
+    if ('clientX' in evt) {
+      clientX = (evt as any).clientX;
+      clientY = (evt as any).clientY;
+    } else if ('touches' in evt && evt.touches.length) {
+      clientX = evt.touches[0].clientX;
+      clientY = evt.touches[0].clientY;
+    }
+    connectStartRef.current = { nodeId: params.nodeId, handleId: params.handleId as string | undefined, startClientX: clientX, startClientY: clientY };
+  };
+
+  const onConnectEnd: OnConnectEnd = (evt) => {
+    const start = connectStartRef.current;
+    connectStartRef.current = null;
+    if (!start) return;
+    const target = evt.target as HTMLElement | null;
+    // If released on pane (not on another handle) create a new node.
+    if (target && target.classList.contains('react-flow__pane')) {
+      let clientX = 0; let clientY = 0;
+      if ('clientX' in evt) {
+        clientX = (evt as any).clientX;
+        clientY = (evt as any).clientY;
+      } else if ('touches' in evt && (evt as any).touches?.length) {
+        clientX = (evt as any).touches[0].clientX;
+        clientY = (evt as any).touches[0].clientY;
+      }
+      const startGraph = rfInstance.screenToFlowPosition({ x: start.startClientX, y: start.startClientY });
+      const endGraph = rfInstance.screenToFlowPosition({ x: clientX, y: clientY });
+      const dx = endGraph.x - startGraph.x;
+      const dy = endGraph.y - startGraph.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < DRAG_THRESHOLD) {
+        return; // below threshold: cancel creation
+      }
+      // Create node centered at drop point.
+      const NEW_W = 120; const NEW_H = 40; // could be measured if needed
+      const newNode = addNode(endGraph.x - NEW_W / 2, endGraph.y - NEW_H / 2);
+      if (newNode) {
+        const opposite: Record<string, string> = { n: 's', s: 'n', e: 'w', w: 'e' };
+        const sourceHandleId = start.handleId;
+        const targetHandleId = sourceHandleId ? opposite[sourceHandleId] : undefined;
+        addEdge(start.nodeId, newNode.id, sourceHandleId, targetHandleId);
+        startEditing(newNode.id);
+      }
     }
   };
   // Dev aid: log whenever edge count changes (can remove later)
@@ -65,7 +122,7 @@ export const GraphCanvas: React.FC = () => {
   const edgeTypes = useMemo(() => ({ 'thought-edge': ThoughtEdge }), []);
   return (
     <div style={{ flex: 1 }}>
-      <ReactFlow
+    <ReactFlow
   nodes={rfNodes}
   edges={rfEdges}
   nodeTypes={nodeTypes}
@@ -79,7 +136,9 @@ export const GraphCanvas: React.FC = () => {
           e.stopPropagation();
           if (editingNodeId !== node.id) startEditing(node.id);
         }}
-        onConnect={onConnect}
+  onConnect={onConnect}
+  onConnectStart={onConnectStart}
+  onConnectEnd={onConnectEnd}
         nodesDraggable
         nodesConnectable={true}
         elementsSelectable
@@ -98,3 +157,9 @@ export const GraphCanvas: React.FC = () => {
     </div>
   );
 };
+
+export const GraphCanvas: React.FC = () => (
+  <ReactFlowProvider>
+    <InnerGraphCanvas />
+  </ReactFlowProvider>
+);
