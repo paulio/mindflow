@@ -27,6 +27,11 @@
   --dur-fast: 80ms;
   --dur-med: 160ms;
   --dur-slow: 320ms;
+
+  /* Typography */
+  --font-size-body: 14px;
+  --font-size-node: 9px;
+  --line-height-node: 1.3; /* Slightly higher to preserve readability at very small size */
 }
 
 .focus-ring {

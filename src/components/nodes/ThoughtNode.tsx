@@ -66,7 +66,7 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
         if (!editing) startEditing(id);
       }}
       style={{
-        padding: 8,
+        padding: 6,
         background: selected ? '#22242a' : '#1b1b1f',
         border: selected ? '2px solid var(--color-accent)' : '1px solid #2a2a30',
         boxShadow: selected ? '0 0 0 3px rgba(79,157,255,0.35)' : 'none',
@@ -76,7 +76,11 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
         cursor: 'text',
         userSelect: 'none',
         maxWidth: 260,
-        whiteSpace: 'pre-wrap'
+        whiteSpace: 'pre-wrap',
+        fontSize: 'var(--font-size-node)',
+        lineHeight: 'var(--line-height-node)',
+        fontWeight: 400,
+        color: 'var(--color-text)'
       }}
     >
       {editing ? (
@@ -88,10 +92,10 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
           onKeyDown={onKey}
           aria-label="Edit thought text"
           rows={1}
-          style={{ width: '100%', resize: 'none', overflow: 'hidden', background:'transparent', color:'#fff', border:'none', outline:'none', fontFamily:'inherit', fontSize:'inherit', lineHeight:1.3 }}
+          style={{ width: '100%', resize: 'none', overflow: 'hidden', background:'transparent', color:'var(--color-text)', border:'none', outline:'none', fontFamily:'inherit', fontSize:'var(--font-size-node)', lineHeight:'var(--line-height-node)', textAlign:'center' }}
         />
       ) : (
-        <span style={{ whiteSpace:'pre-wrap' }}>{text || 'New Thought'}</span>
+        <span style={{ whiteSpace:'pre-wrap', display:'block', textAlign:'center' }}>{text || 'New Thought'}</span>
       )}
     </div>
   );

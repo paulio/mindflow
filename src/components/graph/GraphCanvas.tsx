@@ -9,19 +9,20 @@ import { ThoughtNode } from '../nodes/ThoughtNode';
 const handleStyle: React.CSSProperties = { width: 10, height: 10, border: '2px solid #0d0f17', background: '#555', zIndex: 1 };
 const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
   const { id, data, selected } = props as any;
+  const targetOffset = -14; // outward offset for both source (blue) & target (yellow) handles
   return (
     <div style={{ position: 'relative' }}>
       <ThoughtNode id={id} text={data.label} selected={!!selected} />
-      {/* Directional source handles */}
-      <Handle type="source" id="n" position={Position.Top} style={{ ...handleStyle, background: '#4da3ff' }} />
-      <Handle type="source" id="e" position={Position.Right} style={{ ...handleStyle, background: '#4da3ff' }} />
-      <Handle type="source" id="s" position={Position.Bottom} style={{ ...handleStyle, background: '#4da3ff' }} />
-      <Handle type="source" id="w" position={Position.Left} style={{ ...handleStyle, background: '#4da3ff' }} />
-      {/* Directional target handles */}
-      <Handle type="target" id="n" position={Position.Top} style={{ ...handleStyle, background: '#ffb347' }} />
-      <Handle type="target" id="e" position={Position.Right} style={{ ...handleStyle, background: '#ffb347' }} />
-      <Handle type="target" id="s" position={Position.Bottom} style={{ ...handleStyle, background: '#ffb347' }} />
-      <Handle type="target" id="w" position={Position.Left} style={{ ...handleStyle, background: '#ffb347' }} />
+      {/* Directional source handles (stay inside edge of node) */}
+  <Handle type="source" id="n" position={Position.Top} style={{ ...handleStyle, background: '#4da3ff', top: targetOffset }} />
+  <Handle type="source" id="e" position={Position.Right} style={{ ...handleStyle, background: '#4da3ff', right: targetOffset }} />
+  <Handle type="source" id="s" position={Position.Bottom} style={{ ...handleStyle, background: '#4da3ff', bottom: targetOffset }} />
+  <Handle type="source" id="w" position={Position.Left} style={{ ...handleStyle, background: '#4da3ff', left: targetOffset }} />
+      {/* Directional target handles (shifted outside) */}
+      <Handle type="target" id="n" position={Position.Top} style={{ ...handleStyle, background: '#ffb347', top: targetOffset }} />
+      <Handle type="target" id="e" position={Position.Right} style={{ ...handleStyle, background: '#ffb347', right: targetOffset }} />
+      <Handle type="target" id="s" position={Position.Bottom} style={{ ...handleStyle, background: '#ffb347', bottom: targetOffset }} />
+      <Handle type="target" id="w" position={Position.Left} style={{ ...handleStyle, background: '#ffb347', left: targetOffset }} />
     </div>
   );
 };
