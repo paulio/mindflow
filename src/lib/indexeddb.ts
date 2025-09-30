@@ -189,6 +189,35 @@ export async function cloneGraph(sourceGraphId: string): Promise<GraphRecord | n
   return newGraph;
 }
 
+// Persist helper for FR-043 node deletion + re-parenting.
+export async function persistNodeDeletion(
+  graphId: string,
+  deletedNodeId: string,
+  removedEdgeIds: string[],
+  newEdges: EdgeRecord[]
+): Promise<void> {
+  const db = await initDB();
+  const tx = db.transaction(['graphNodes','graphEdges','graphs'], 'readwrite');
+  // Delete node
+  await tx.objectStore('graphNodes').delete([graphId, deletedNodeId]);
+  // Delete removed edges
+  const edgesStore = tx.objectStore('graphEdges');
+  for (const id of removedEdgeIds) {
+    await edgesStore.delete([graphId, id]);
+  }
+  // Insert new edges (re-parent)
+  for (const e of newEdges) {
+    if (e.graphId !== graphId) continue;
+    await edgesStore.put(e);
+  }
+  const g = await tx.objectStore('graphs').get(graphId) as GraphRecord | undefined;
+  if (g) {
+    g.lastModified = nowIso();
+    await tx.objectStore('graphs').put(g);
+  }
+  await tx.done;
+}
+
 // Global user settings (key/value) convenience
 interface SettingRecord { key: string; value: any }
 

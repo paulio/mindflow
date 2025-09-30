@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph } from '../lib/indexeddb';
+import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph, persistNodeDeletion } from '../lib/indexeddb';
 import { createNode, createEdge } from '../lib/graph-domain';
 import { NodeRecord, EdgeRecord, GraphRecord } from '../lib/types';
 import { events } from '../lib/events';
@@ -228,12 +228,22 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const nodeLevel = level.get(nodeId);
     // If no levels known or node has no level, fallback: simple deletion without re-parent (safety)
     if (nodeLevel === undefined) {
+      // Fallback simple delete + persist
+      let removedEdgeIds: string[] = [];
       setNodes(ns => ns.filter(n => n.id !== nodeId));
-      setEdges(es => es.filter(e => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId));
+      setEdges(es => {
+        const kept = es.filter(e => {
+          const rem = e.sourceNodeId === nodeId || e.targetNodeId === nodeId;
+          if (rem) removedEdgeIds.push(e.id);
+          return !rem;
+        });
+        return kept;
+      });
       mutationCounter.current++;
       if (selectedNodeId === nodeId) setSelectedNodeId(null);
       if (editingNodeId === nodeId) setEditingNodeId(null);
       events.emit('node:deleted', { graphId: graph.id, nodeId });
+      void persistNodeDeletion(graph.id, nodeId, removedEdgeIds, []);
       return;
     }
     // Determine parent candidates: neighbors with smaller level
@@ -254,13 +264,22 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }, '' as string);
     }
     if (!parentId) {
-      // No parent (isolated or cycle scenario) -> simple delete
+      // No parent (isolated or cycle scenario) -> simple delete with persistence
+      let removedEdgeIds: string[] = [];
       setNodes(ns => ns.filter(n => n.id !== nodeId));
-      setEdges(es => es.filter(e => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId));
+      setEdges(es => {
+        const kept = es.filter(e => {
+          const rem = e.sourceNodeId === nodeId || e.targetNodeId === nodeId;
+          if (rem) removedEdgeIds.push(e.id);
+          return !rem;
+        });
+        return kept;
+      });
       mutationCounter.current++;
       if (selectedNodeId === nodeId) setSelectedNodeId(null);
       if (editingNodeId === nodeId) setEditingNodeId(null);
       events.emit('node:deleted', { graphId: graph.id, nodeId });
+      void persistNodeDeletion(graph.id, nodeId, removedEdgeIds, []);
       return;
     }
     // Children: neighbors with level = nodeLevel + 1
@@ -295,9 +314,9 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     events.emit('node:deleted', { graphId: graph.id, nodeId });
     const sortedNew = [...newEdges].sort((a, b) => a.targetNodeId.localeCompare(b.targetNodeId));
     for (const e of sortedNew) { events.emit('edge:created', { graphId: graph.id, edgeId: e.id }); }
-    // Persistence (best-effort asynchronous)
-    void saveNodes(graph.id, nodes.filter(n => n.id !== nodeId));
-    if (newEdges.length) void saveEdges(graph.id, newEdges);
+    // Persistence: remove node + incident edges, insert new edges
+    const removedEdgeIds = Array.from(incidentEdgeIds);
+    void persistNodeDeletion(graph.id, nodeId, removedEdgeIds, newEdges);
   }, [graph, nodes, edges, levels, selectedNodeId, editingNodeId]);
 
   const setNodePositionEphemeral = useCallback((nodeId: string, x: number, y: number) => {
