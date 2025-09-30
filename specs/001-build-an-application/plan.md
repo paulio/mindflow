@@ -354,6 +354,25 @@ Algorithm Inputs: parent node (Px, Py), child node (Cx, Cy). Use raw stored posi
 6. Testing: (a) Unit: name generation with pre-existing Clone1/Clone2 returns Clone3; (b) Integration: clone action results in structurally identical node/edge counts and new graph id; (c) Unit: verifying new IDs differ from originals; (d) Optional integration: editing original after clone does not affect clone.
 7. Non-Goals: Undo stack transfer; differential cloning; partial subset cloning (future enhancements).
 
+### Undo / Redo (Spec Branch 002) Implementation Strategy (Preview)
+NOTE: Core specification lives in `specs/002-the-graph-editor/spec.md`; this section summarizes integration intent with existing architecture.
+1. Scope: Session-scoped node mutation history only (creation, deletion, text commit, position commit). No persistence of history across reloads; graph state itself is persisted immediately via autosave.
+2. Data Model: History forms two logical stacks (or an index boundary) with maximum depth 100 (FR-026). Pushing when full discards oldest entry (drop-from-bottom strategy).
+3. Granularity Rules: One entry per committed text change (no merge window), one per completed drag gesture, one per node creation, one per node deletion (compound re-parenting captured inside single entry). No partial entries mid-drag or mid-edit.
+4. Exclusions: Export, theme switch, clone, view-only actions produce no entries and do not clear redo. Clone starts a new empty history for the new graph (FR-027); export leaves history untouched (FR-028).
+5. LIFO Integrity: Only reverse-walk permitted; user cannot skip older steps (FR-019). Parent dependency restoration safe by design.
+6. Deletion Undo: Restores original node, its text, coordinates, and original edge relationships while removing interim re-parent edges; handle assignment on redo uses existing deterministic logic.
+7. Depth Enforcement: Implement constant-time check; on push when size==100 remove oldest before append to preserve chronological order.
+8. UI: Initial delivery buttons only (no keyboard shortcuts) (FR-029). Disabled state logic derived from boundary index.
+9. Accessibility: Aria labels “Undo last change” / “Redo change”; disabled state conveyed via aria-disabled.
+10. Integration Points: Graph store mutation functions will notify undo manager with a structured change descriptor after successful commit & persistence scheduling.
+11. Testing Strategy (New Tasks to Add):
+   - Contract: event exclusion (no spurious events on undo/redo) & history depth enforcement.
+   - Unit: creation, deletion, text, move entries; depth rollover; redo clearing on new change.
+   - Integration: mixed sequence reversal, redo after undo, disabled states on boundaries, deletion undo restoring relationships.
+12. Performance: Target qualitative “instant” (< a frame) restoration; large deletion undo limited by edge reconstruction already optimized.
+13. Future Enhancements (Backlog): Shortcut support (Ctrl+Z / Ctrl+Shift+Z), grouping multi-select operations, merging rapid text edits, cross-session history persistence opt-in.
+
 ## Complexity Tracking
 *Fill ONLY if Constitution Check has violations that must be justified*
 

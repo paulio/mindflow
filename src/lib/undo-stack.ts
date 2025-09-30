@@ -11,7 +11,9 @@ export class UndoStack {
     }
     this.stack.push(entry);
     if (this.stack.length > this.max) {
+      // remove oldest; pointer shifts left implicitly by one
       this.stack.shift();
+      if (this.pointer > -1) this.pointer = this.stack.length - 1; // point to last entry
     } else {
       this.pointer++;
     }
@@ -33,4 +35,5 @@ export class UndoStack {
     return true;
   }
   size() { return this.stack.length; }
+  clear() { this.stack = []; this.pointer = -1; }
 }
