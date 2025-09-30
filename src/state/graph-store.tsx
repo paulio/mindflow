@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs } from '../lib/indexeddb';
+import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph } from '../lib/indexeddb';
 import { createNode, createEdge } from '../lib/graph-domain';
 import { NodeRecord, EdgeRecord, GraphRecord } from '../lib/types';
 import { events } from '../lib/events';
@@ -22,6 +22,7 @@ interface GraphContext extends GraphState {
   // Ephemeral position update during drag (no persistence, no lastModified update)
   setNodePositionEphemeral(nodeId: string, x: number, y: number): void;
   deleteNode(nodeId: string): void; // FR-043 deletion with re-parenting
+  cloneCurrent(): Promise<void>; // FR-046 clone map
   // Centralized edit focus management so ReactFlow re-renders do not lose edit mode when selection changes.
   editingNodeId: string | null;
   startEditing(nodeId: string): void;
@@ -190,6 +191,23 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     updateGraphMeta(graph.id, { viewport: { x, y, zoom } }).catch(()=>{});
   }, [graph]);
 
+  const cloneCurrent = useCallback(async () => {
+    if (!graph) return;
+    const g = await cloneGraph(graph.id);
+    if (!g) return;
+    // Load newly cloned graph
+    const snap = await loadGraph(g.id);
+    if (snap) {
+      setGraph(snap.graph);
+      setNodes(snap.nodes);
+      setEdges(snap.edges);
+      mutationCounter.current++;
+      await refreshList();
+      setView('canvas');
+      setSelectedNodeId(null); // Start with no selection (or could auto-select root in future)
+    }
+  }, [graph]);
+
   // FR-043: Delete node with hierarchical re-parenting of its children.
   const deleteNode = useCallback((nodeId: string) => {
     if (!graph) return;
@@ -310,7 +328,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

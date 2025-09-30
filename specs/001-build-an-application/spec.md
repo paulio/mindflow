@@ -87,6 +87,7 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 23. **Given** I am viewing the Details pane while a map is open on the Editing Canvas, **Then** I see a clearly labeled "Map Actions" (or equivalent) section that includes a "Delete Map" action distinct from per‑node controls.
 24. **Given** I activate the "Delete Map" action in the Details pane and confirm, **Then** the current map is removed from persistence, the Editing Canvas closes, and I am returned to the Map Library list with that map no longer present (unless a persistence error occurs, in which case an error message is surfaced and the map remains).
 25. **Given** a map is open and the Details pane is visible, **When** I choose "Export Map" → "Export as PNG", **Then** a PNG file download begins containing a rasterized image of the entire current graph (all nodes & edges) using the currently applied theme (visual fidelity). **And** when I choose "Export as Markdown", **Then** a `.md` file download begins containing a hierarchical bullet list representation of the graph rooted at the Root node (level indentation reflects computed levels) including each node’s text exactly once.
+26. **Given** I am viewing the Map Actions section in the Details pane for an existing map, **When** I activate the "Clone" action, **Then** a new map is created with identical nodes (text, positions), edges, and viewport as the source (no references shared), assigned a unique name of the form `<OriginalName>Clone<N>` where `N` is the lowest positive integer that yields a unique name (if no conflict, `N` = 1), and the application immediately switches to the cloned map in the Editing Canvas with the same Root node selected (or focused for edit only if original root was being edited at the moment of cloning).
 
 ### Edge Cases
 - Creating many nodes rapidly (drag spamming) should not produce orphan edges or duplicate node IDs.
@@ -114,6 +115,9 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
  - Export PNG should not alter or persist any additional state (read-only render pass) and should include all nodes even if partially off current viewport (graph fit logic applied for export only).
  - Export Markdown must escape Markdown control characters in node text (assumption) to avoid unintended formatting beyond bullet structure.
  - Export actions must not emit structural graph events (no node/edge created/updated/deleted) – optional dedicated export:* events deferred.
+ - Clone action creates a deep copy of graph structure (graph metadata + nodes + edges + viewport) with entirely new graph ID and regenerated node & edge IDs (implementation detail) so subsequent edits do not affect the source.
+ - Clone naming: Base pattern `<OriginalName>Clone<N>` starting at N=1; increment N until no existing graph has exactly that name (case-sensitive match). Original name unchanged.
+ - Cloning a very large map should complete within performance envelope similar to loading that map (<500ms target for 500 nodes) and MUST NOT block the UI thread excessively (future optimization with chunked cloning if needed).
 
 ## Requirements *(mandatory)*
 
@@ -173,6 +177,9 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - **FR-045**: System MUST provide an Export Map control within the Details pane offering at least two sub-options: Export as PNG and Export as Markdown.
 - **FR-045a**: Export as PNG MUST generate a downloadable PNG image representing the full current graph (all nodes & edges) using the active theme styling; export MUST NOT mutate graph data or change viewport.
 - **FR-045b**: Export as Markdown MUST generate a `.md` file containing a hierarchical bullet list: Root as top-level line, each subsequent level indented by two spaces per level (implementation-defined but consistent). Each node appears exactly once; multi-line node text MAY be flattened (newlines replaced with spaces) for bullet output. Special Markdown characters in node text (e.g., `* _ #`) SHOULD be escaped to preserve literal text.
+- **FR-046**: System MUST provide a Clone Map action in the Details pane Map Actions section that creates a new map duplicating the current map's nodes (text, position), edges, and viewport without modifying the source.
+- **FR-046a**: The cloned map MUST receive a unique graph name following `<OriginalName>Clone<N>` where N is the smallest positive integer producing a unique name among existing maps (e.g., first clone: `IdeasClone1`; if `IdeasClone1` exists, next is `IdeasClone2`).
+- **FR-046b**: After cloning, the system MUST automatically load the cloned map into the Editing Canvas (replacing the previous view) and update the Map Library list to include it (ordered per existing sorting rules). Undo/redo history does NOT transfer (starts empty) but node hierarchy semantics remain identical due to structural duplication.
 
 Assumptions incorporated from clarifications; remaining open items limited to performance metric formalization and future shortcut design.
 

@@ -25,6 +25,7 @@
  - [ ] T117 [P] Contract test root deletion prohibition (FR-043a) (`tests/contract/root-delete-prohibit.test.ts`) – attempt root delete, assert no node:deleted event & operation returns no-op
  - [ ] T135 [P] Contract test export markdown structure (FR-045b) (`tests/contract/export-markdown-contract.test.ts`) – given small graph, exported markdown lines match bullet hierarchy spec (Root, indented children)
  - [ ] T136 [P] Contract test export PNG metadata (FR-045a) (`tests/contract/export-png-metadata.test.ts`) – stub canvas, assert filename pattern `<graph-name>.png` and no structural events emitted
+ - [ ] T154 [P] Contract test clone naming uniqueness (FR-046a) (`tests/contract/clone-naming.test.ts`) – precreate graphs Original, OriginalClone1, ensure next is OriginalClone2
 
 ### Integration Tests (User Scenarios & Validation Checklist)
 - [X] T012 [P] Integration test create first node & autosave (`tests/integration/create-first-node.spec.ts`)
@@ -59,6 +60,8 @@
  - [ ] T137 [P] Integration test delete map via Details pane returns to library (FR-044) (`tests/integration/delete-map-details-pane.spec.ts`)
  - [ ] T138 [P] Integration test export PNG triggers download (blob URL intercepted) (FR-045a) (`tests/integration/export-png.spec.ts`)
  - [ ] T139 [P] Integration test export Markdown triggers download & content snapshot (FR-045b) (`tests/integration/export-markdown.spec.ts`)
+ - [ ] T155 [P] Integration test clone map creates deep copy & switches context (FR-046b) (`tests/integration/clone-map-switch.spec.ts`)
+ - [ ] T156 [P] Integration test clone large map performance (<500ms 500 nodes) (FR-046 performance) (`tests/integration/clone-perf.spec.ts`)
 
 ### Unit / Component Tests (Early Core Logic Without Implementation)
 - [X] T021 [P] Unit test graph ID + node/edge uniqueness utilities (`tests/unit/graph-ids.test.ts`)
@@ -84,6 +87,9 @@
  - [ ] T141 [P] Unit test export bounding box computation (FR-045a) (`tests/unit/export-bbox.test.ts`)
  - [ ] T142 [P] Unit test PNG export draws all nodes & edges count parity (mock canvas) (FR-045a) (`tests/unit/export-png-render.test.ts`)
  - [ ] T143 [P] Unit test exports do not emit graph mutation events (FR-045/immutability) (`tests/unit/export-no-events.test.ts`)
+ - [ ] T157 [P] Unit test clone name generator increments correctly skipping existing numbers (FR-046a) (`tests/unit/clone-name-generator.test.ts`)
+ - [ ] T158 [P] Unit test clone deep copy (IDs differ, text/positions equal) (FR-046) (`tests/unit/clone-deep-copy.test.ts`)
+ - [ ] T159 [P] Unit test clone does not mutate source graph (FR-046) (`tests/unit/clone-source-immutability.test.ts`)
 
 ## Phase 3.3: Core Implementation (ONLY after above tests are added & failing)
 - [X] T025 Implement persistence layer IndexedDB adapter `src/lib/indexeddb.ts` (init stores, CRUD, batch writes)
@@ -135,6 +141,9 @@
  - [ ] T148 Implement export download trigger helper (anchor/objectURL abstraction) (FR-045a/045b)
  - [ ] T149 Integrate export actions into Map Actions UI (FR-045)
  - [ ] T150 Add export performance timing (optional) (FR-045a performance note)
+ - [ ] T160 Implement clone utility & persistence (FR-046)
+ - [ ] T161 Wire Clone action into Map Actions UI (FR-046b)
+ - [ ] T162 Add clone performance timing metric (optional) (FR-046 performance)
  - [ ] T126 Implement deletion domain logic (parent/children resolution, edge diff, validation) (FR-043..FR-043c)
  - [ ] T127 Implement trash-can UI control (selected node overlay, disabled for root) (FR-043a)
  - [ ] T128 Implement ordered event emission (node:deleted then edge:created) & update types (FR-043c)
@@ -176,6 +185,8 @@
  - [ ] T151 Update quickstart/docs for Map Actions section & delete map from Details pane (FR-044)
  - [ ] T152 Update quickstart/docs for Export PNG & Markdown usage (FR-045a, FR-045b)
  - [ ] T153 Add manual validation checklist entries for exports (PNG visual, Markdown structure) (FR-045)
+ - [ ] T163 Update quickstart/docs for Clone Map action (FR-046..FR-046b)
+ - [ ] T164 Add manual validation checklist entries for clone scenarios & performance target (FR-046)
  - [ ] T131 Update events contract doc for deletion ordering & root prohibition (FR-043c, FR-043a)
  - [ ] T132 Update quickstart/docs for node deletion & re-parent semantics (FR-043..FR-043b)
  - [ ] T133 Add manual validation checklist entries for deletion scenarios & performance target (FR-043)
@@ -205,6 +216,8 @@
  - Deletion implementation ordering: T126 (domain logic) → T127 (UI control) → T128 (ordered events) → T129 (cache invalidation ensure) → (optional) T130 (undo compound). Docs/polish (T131-T133) + performance metric (T134) after stable implementation & passing tests.
  - Export tests (T135-T143) MUST precede export implementation tasks (T144-T149).
  - Export implementation ordering: T144 (Map Actions UI skeleton) → T145 (Delete Map wiring) → T146 (markdown utility) → T147 (PNG utility) → T148 (download helper) → T149 (UI integration). Docs/polish (T151-T153) after tests pass. Performance metric (T150 optional) can follow utilities.
+ - Clone tests (T154-T159) MUST precede clone implementation tasks (T160-T161).
+ - Clone implementation ordering: T160 (utility) → T161 (UI wiring) → optional performance metric T162. Docs/polish (T163-T164) after implementation passes tests.
 
 ## Parallel Execution Examples
 ```

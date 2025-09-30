@@ -147,6 +147,48 @@ export async function updateGraphMeta(graphId: string, patch: Partial<Pick<Graph
   await db.put('graphs', graph);
 }
 
+export async function cloneGraph(sourceGraphId: string): Promise<GraphRecord | null> {
+  const db = await initDB();
+  const snap = await loadGraph(sourceGraphId);
+  if (!snap) return null;
+  const existing = await listGraphs();
+  const base = snap.graph.name;
+  let i = 1; let candidate = `${base}Clone${i}`;
+  const names = new Set(existing.map(g => g.name));
+  while (names.has(candidate)) { i++; candidate = `${base}Clone${i}`; }
+  const ts = nowIso();
+  const newGraph: GraphRecord = {
+    id: generateId(),
+    name: candidate.slice(0,80),
+    created: ts,
+    lastModified: ts,
+    lastOpened: ts,
+    schemaVersion: snap.graph.schemaVersion,
+    settings: { ...snap.graph.settings },
+    viewport: snap.graph.viewport ? { ...snap.graph.viewport } : { x:0, y:0, zoom:1 }
+  };
+  // Build node id map
+  const idMap = new Map<string,string>();
+  const newNodes = snap.nodes.map(n => {
+    const nid = generateId(); idMap.set(n.id, nid);
+    const nn: NodeRecord = { ...n, id: nid, graphId: newGraph.id, created: n.created, lastModified: n.lastModified };
+    return nn;
+  });
+  const newEdges = snap.edges.map(e => {
+    const eid = generateId();
+    const ne: EdgeRecord = { ...e, id: eid, graphId: newGraph.id, sourceNodeId: idMap.get(e.sourceNodeId)!, targetNodeId: idMap.get(e.targetNodeId)!, created: e.created };
+    return ne;
+  });
+  const tx = (await initDB()).transaction(['graphs','graphNodes','graphEdges'], 'readwrite');
+  await tx.objectStore('graphs').put(newGraph);
+  const nodesStore = tx.objectStore('graphNodes');
+  for (const n of newNodes) await nodesStore.put(n);
+  const edgesStore = tx.objectStore('graphEdges');
+  for (const e of newEdges) await edgesStore.put(e);
+  await tx.done;
+  return newGraph;
+}
+
 // Global user settings (key/value) convenience
 interface SettingRecord { key: string; value: any }
 
