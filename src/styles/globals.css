@@ -1,0 +1,4 @@
+@import './tokens.css';
+/* Global styles */
+html,body,#root { height:100%; margin:0; font-family: system-ui, sans-serif; }
+body { background: var(--color-bg); color: var(--color-text); }
