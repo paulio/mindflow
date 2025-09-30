@@ -107,8 +107,8 @@ export const NoteNode: React.FC<Props> = ({ id, text, selected }) => {
 					style={{
 						position: 'absolute',
 						top: -28,
-						left: '50%',
-						transform: 'translateX(-50%)',
+											left: '50%',
+											transform: 'translateX(-50%)',
 						width: 22,
 						height: 22,
 						borderRadius: '50%',
