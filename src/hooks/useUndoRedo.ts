@@ -27,9 +27,11 @@ export function resetUndoHistory() {
 }
 
 function perform(kind: 'undo' | 'redo') {
+  const peek = (globalStack as any).__peekTypes?.() || { undoType: null, redoType: null };
+  const actionType = kind === 'undo' ? (peek.undoType ?? 'generic') : (peek.redoType ?? 'generic');
   const ok = kind === 'undo' ? globalStack.undo() : globalStack.redo();
   if (ok) {
-    events.emit(kind === 'undo' ? 'undo:applied' : 'redo:applied', { actionType: 'generic' });
+    events.emit(kind === 'undo' ? 'undo:applied' : 'redo:applied', { actionType });
     notify();
   }
 }

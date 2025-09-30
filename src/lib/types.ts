@@ -17,6 +17,15 @@ export interface NodeRecord {
   y: number;
   created: string;
   lastModified: string;
+  // Toolbar extension fields (Feature 003)
+  nodeKind?: 'thought' | 'note' | 'rect'; // undefined => 'thought' for backward compatibility
+  bgColor?: string; // persisted hex or token reference
+  textColor?: string; // notes only
+  frontFlag?: boolean; // true => render above thought nodes (default true)
+  width?: number; // rectangles: persisted width (FR-041..FR-044)
+  height?: number; // rectangles: persisted height (FR-041..FR-044)
+  textAlign?: 'left' | 'center' | 'right'; // notes: horizontal alignment
+  textVAlign?: 'top' | 'middle' | 'bottom'; // notes: vertical alignment
 }
 
 export interface EdgeRecord {

@@ -88,7 +88,10 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
         fontSize: 'var(--font-size-node)',
         lineHeight: 'var(--line-height-node)',
         fontWeight: 400,
-        color: 'var(--mf-node-text)'
+        color: 'var(--mf-node-text)',
+        position: 'relative', // needed so floating delete button positions correctly
+        overflow: 'visible',
+        paddingTop: selected && !editing ? 16 : 4 // create headroom for in-bounds delete button when visible
       }}
     >
       {editing ? (
@@ -113,25 +116,27 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
           onClick={(e) => { e.stopPropagation(); if (!isRoot) deleteNode(id); }}
           style={{
             position: 'absolute',
-            top: -10,
-            right: -10,
-            width: 20,
-            height: 20,
+            top: 0,
+            left: '50%',
+            transform: 'translate(-50%, -50%)', // overlap the border slightly but remain within wrapper bounds
+            width: 22,
+            height: 22,
             borderRadius: '50%',
             border: '1px solid var(--mf-node-border)',
-            background: isRoot ? 'rgba(255,255,255,0.1)' : 'var(--mf-node-bg)',
+            background: isRoot ? 'rgba(255,255,255,0.15)' : 'var(--mf-node-bg)',
             color: 'var(--mf-node-text)',
-            fontSize: 12,
+            fontSize: 14,
+            fontWeight: 600,
+            lineHeight: 1,
             cursor: isRoot ? 'not-allowed' : 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             boxShadow: '0 0 0 1px #000',
-            zIndex: 10
+            zIndex: 999, // ensure above edges & other overlays
+            opacity: isRoot ? 0.6 : 1
           }}
-        >
-          ×
-        </button>
+        >×</button>
       )}
     </div>
   );

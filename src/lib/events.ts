@@ -13,7 +13,13 @@ export type EventName =
   | 'autosave:failure'
   | 'undo:applied'
   | 'redo:applied'
-  | 'theme:changed';
+  | 'theme:changed'
+  // Toolbar / annotation feature events
+  | 'toolbar:toolActivated'
+  | 'toolbar:toolDeactivated'
+  | 'node:colorChanged'
+  | 'node:zOrderChanged'
+  | 'node:resized';
 
 export interface EventPayloads {
   'graph:created': { graphId: string };
@@ -30,6 +36,11 @@ export interface EventPayloads {
   'undo:applied': { actionType: string };
   'redo:applied': { actionType: string };
   'theme:changed': { previousTheme: string | null; newTheme: string; ts: number };
+  'toolbar:toolActivated': { tool: 'note' | 'rect' };
+  'toolbar:toolDeactivated': { tool: 'note' | 'rect' };
+  'node:colorChanged': { nodeId: string; bgColor?: string; textColor?: string };
+  'node:zOrderChanged': { nodeId: string; frontFlag: boolean };
+  'node:resized': { nodeId: string; width: number; height: number; prevWidth: number; prevHeight: number };
 }
 
 type Handler<E extends EventName> = (payload: EventPayloads[E]) => void;

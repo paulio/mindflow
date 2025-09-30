@@ -26,6 +26,8 @@ As a user exploring and refining ideas in a graph, I want to safely experiment (
 11. Disabled Controls on Fresh Load: **Given** I load a graph and perform no changes, **Then** both Undo and Redo controls are disabled.
 12. Session Reset on Reload: **Given** I perform several changes then reload the application, **When** the graph loads, **Then** the visual graph reflects all persisted changes but Undo and Redo histories are empty.
 13. Delete Then Immediate Undo Selection: **Given** I delete a selected node, **When** I undo, **Then** the node reappears but selection/focus is not forcibly reassigned (no automatic focus restore).
+14. Multi-step Redo Forward Traversal: **Given** I perform 4 changes (A,B,C,D), then undo 3 (leaving only A applied and (B,C,D) in Redo), **When** I press Redo three times, **Then** the system reapplies B, then C, then D in chronological order and Redo becomes disabled afterward.
+15. Redo Disabled After New Change: **Given** I undo one step (making Redo available), **When** I perform a new eligible change E, **Then** Redo becomes disabled and only E (plus prior still-applied steps) remains undoable.
 
 ### Edge Cases
 - Undo / Redo invoked with no history (controls disabled; invocation is a no-op if somehow triggered).
@@ -38,6 +40,8 @@ As a user exploring and refining ideas in a graph, I want to safely experiment (
 - Text edit abandoned with no change produces no history entry.
 - Session reload clears history (graph state persists, history does not).
 - Future multi-select (if added) should record one combined history step covering all selected nodes.
+- Redo is immediately invalidated (cleared) the moment a new change is pushed after one or more undos.
+- Performing Undo repeatedly until baseline leaves all reverted steps in the Redo stack; performing Redo walks them in original chronological order.
 
 ---
 
@@ -74,10 +78,16 @@ As a user exploring and refining ideas in a graph, I want to safely experiment (
 - **FR-028**: Export operations MUST NOT create, modify, or clear history.
 - **FR-029**: No keyboard shortcuts for Undo/Redo MUST be active initially (buttons only) to avoid conflicts.
 - **FR-030**: Future multi-select (if introduced) MUST record a single combined history step for that multi-node action.
+- **FR-031**: The system MUST conceptually maintain two logical stacks: (a) Undo Stack containing already-applied reversible steps in chronological order (top = most recent) and (b) Redo Stack containing steps previously undone (top = most recently undone). (Implementation MAY use a single array + pointer, but externally behaves identically.)
+- **FR-032**: Executing Undo MUST pop the top entry from the Undo Stack, apply its reversal, and push that entry onto the Redo Stack (now representing a forward-replayable step).
+- **FR-033**: Executing Redo MUST pop the top entry from the Redo Stack, apply its forward function, and push that entry back onto the Undo Stack.
+- **FR-034**: Pushing any new change (after at least one Undo) MUST clear the entire Redo Stack prior to inserting the new Undo entry (no branching histories retained).
+- **FR-035**: Redo traversal MUST restore steps strictly in their original chronological order (the order they were first applied) with no skipped entries.
 
 ### Key Entities
 - **Change (History Entry)**: A record of a single reversible user-intent action on nodes: type (creation, deletion, text change, position change), target node identifier(s), prior observable state summary, resulting observable state summary, timestamp/order index. (Representation details intentionally abstracted.)
 - **History**: An ordered stack (conceptually) of Changes representing all applied reversible actions since load or last reset. Contains a pointer defining the current active boundary between performed and redoable changes. (Storage mechanism not specified here.)
+- **Redo History (Forward Stack)**: The ordered collection of changes that have been undone and can be replayed. Emptied immediately upon any new eligible change being committed. Forward reapplication (Redo) moves entries back to the primary (Undo) side.
 
 ### Dependencies & Assumptions
 - Existing graph behaviors (creation, deletion with re-parenting, text commit, move commit) are deterministic.
@@ -87,6 +97,17 @@ As a user exploring and refining ideas in a graph, I want to safely experiment (
 - Session-only history: page reload or application restart resets history without altering persisted graph state.
 - Graph persistence always reflects the latest applied change set; absence of history on reload does not imply data loss.
 - Multi-select not currently implemented; future support will treat a batch as one step.
+  
+### Conceptual Model: Two-Stack (Logical) Redo Design
+User experience mirrors a classical two-stack model:
+
+1. Applying a new change: push onto Undo Stack; Redo Stack cleared.
+2. Undo: pop from Undo Stack, apply reversal, push onto Redo Stack.
+3. Redo: pop from Redo Stack, apply forward action, push onto Undo Stack.
+4. Baseline reached (Undo empty): only Redo Stack (if non-empty) enables forward traversal.
+5. Any divergence (new change) after Undo discards all redoable steps to prevent branching timelines.
+
+This model is described conceptually only; the implementation may choose an equivalent representation (e.g., single array + index) provided externally observable behavior remains identical to these rules.
 
 ---
 
