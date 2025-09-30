@@ -3,7 +3,7 @@ import { useGraph } from '../../state/graph-store';
 import { useTheme } from '../../state/theme-store';
 
 export const GraphMetaPanel: React.FC = () => {
-  const { graph, nodes, edges, renameGraph } = useGraph();
+  const { graph, nodes, edges, renameGraph, selectedNodeId, selectNode, levels } = useGraph();
   const { theme, setTheme, available } = useTheme();
   const [name, setName] = useState(graph?.name ?? '');
   if (!graph) return null;
@@ -15,6 +15,14 @@ export const GraphMetaPanel: React.FC = () => {
         <button type="submit">Rename</button>
       </form>
       <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>Nodes: {nodes.length} | Edges: {edges.length}</div>
+      {selectedNodeId && (
+        <div style={{ fontSize: 12, marginTop: 6 }}>
+          {(() => {
+            const lvl = levels.get(selectedNodeId) ?? 0;
+            return <span>Level: {lvl === 0 ? 'Root' : `Child ${lvl}`}</span>;
+          })()}
+        </div>
+      )}
       <hr style={{ border: 'none', borderTop: '1px solid #222', margin: '8px 0' }} />
       <section aria-labelledby="global-theme-heading">
         <h4 id="global-theme-heading" style={{ margin: '4px 0 6px', fontSize: 13 }}>Global Theme</h4>

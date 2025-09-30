@@ -48,6 +48,8 @@ and accessibility targets derived from constitution and preliminary assumptions.
 8. Added FR-031..FR-035 defining: dedicated Library view (FR-031), explicit transition on load (FR-032), guarded back navigation with unsaved-change warning (FR-033 leveraging FR-030), non-destructive isolation of library operations from active canvas (FR-034), and per-map viewport persistence & restoration (FR-035).
 9. Edge Cases expanded: viewport isolation, unsaved-change guard on library navigation, rapid map switching without leaking pan/zoom transforms.
 10. Added FR-036..FR-040a introducing a global Theme Manager (accessible through Details pane) with two initial themes (classic & subtle), global (not per-graph) persistence, immediate re-render on switch, accessibility contrast requirements, and explicit UI separation within the Details pane to convey scope.
+11. Added FR-041 enabling repeated directional handle drags (fan-out) (already supported; requirement formalized).
+12. Added FR-042 introducing hierarchical node levels (Root = level 0, Child N) with display in Details pane only (computed, not persisted required).
 
 Plan adjustments (delta):
 - Add integration test: reposition node (drag) updates position & edges live; persists after drop (FR-025 / Scenario #10).
@@ -71,6 +73,8 @@ Plan adjustments (delta):
  - Add tasks for: theme config definition, global theme provider/store integration, Details pane Theme Manager UI section (visually separated), persistence load-before-paint strategy, accessibility contrast test (WCAG AA), event contract test, snapshot/theme switch re-render test, and fallback logic if stored theme key invalid.
  - Add token refactor task: extract current hard-coded node/handle colors to CSS custom properties namespaced by theme (e.g., `--mf-node-bg`, `--mf-node-border`) with theme root class switch.
  - Add subtle theme design validation step (manual + automated contrast assertion) before finalizing tokens.
+ - Add hierarchy computation & display: derive level via BFS from root (first created node) at runtime; no schema change. Provide selector in GraphMetaPanel to show read-only "Level: Root | Child 1 | Child 2...".
+ - Add tests: unit BFS level derivation; integration selecting nodes shows correct levels.
 
 ## Technical Context
 **Language/Version**: TypeScript (ES2022 target) via Vite + React 18
@@ -81,7 +85,9 @@ Plan adjustments (delta):
 **Project Type**: Single web frontend (no backend service). All logic client-side.
 **View Architecture**: Two top-level application states: (1) Map Library (non-interactive list & management actions) and (2) Editing Canvas (ReactFlow graph for one active map). Transitions: Open Map, New Map (create→auto-transition), Back to Library. Each map persists its own viewport (pan, zoom level) alongside metadata and restores it on open; library operations on other maps leave the active canvas state untouched until an explicit load.
 **Theme Architecture (NEW)**: Global theme (user-level) applied at app root via a `data-theme` attribute or root class (e.g., `.theme-classic`, `.theme-subtle`). Theme selection persists in a lightweight `settings` store (IndexedDB record) loaded before first paint (apply stored theme synchronously to avoid flash). The Details pane hosts a "Global Theme" section (visually separated) listing radio buttons or segmented control for available themes. A theme switch updates CSS custom properties (token layer) driving node background, border width/color, text color, handle colors, selection outline, and textarea styles. Switching emits `theme:changed { previousTheme, newTheme, ts }`. Invalid stored theme keys fall back to default `classic` and emit a logged warning (non-blocking). Accessibility guard: subtle theme tokens must maintain ≥4.5:1 contrast for node text vs background (validated via test computing contrast ratio from computed hex values in config).
+**Hierarchy Display Architecture (NEW)**: Treat the first (root) node as level 0. For any other node, compute level as the length of the shortest undirected path to root using existing edges. Because edges are undirected, a simple BFS from root each time selection changes (or memoized until graph mutates) yields levels. No persistence required; recompute on load. In presence of cycles (not prevented), BFS still produces minimum depth, which we display. The Details pane adds a read-only label (e.g., "Level: Root" or "Level: Child 3"). Performance: For typical graphs (<1000 nodes) BFS O(N+E) on selection is acceptable; optional future optimization: cache level map invalidated on node/edge mutation events.
 **Performance Goals**: 500-node cold load <1500ms; warm load <500ms; autosave p95 <150ms; frame render avg <40ms p95 <80ms during pan/zoom.
+**Hierarchy Performance Considerations**: Level computation triggered on node/edge mutation or selection. Cache with a version counter (increment on structural mutating events) to prevent redundant BFS. Expected BFS time << 10ms for 500 nodes; measure and add metric flag if >16ms (future optimization threshold).
 **Theme Performance Considerations**: Theme switch MUST avoid per-node React re-render cascade where possible—prefer CSS variable swap for majority of visual changes. Node component only re-renders if theme-dependent logic (e.g., conditional class) requires it. Target <1 frame (<16ms) style recalculation on mid-size graph (≈200 nodes). Measure using PerformanceOverlay (extend existing metrics module to time theme switch).
 **Constraints**: Offline-capable; storage warning if >5MB; node text <=255 chars; undo depth 10; no multi-tab sync.
 **Scale/Scope**: MVP single-user local graphs; up to ~1000 nodes (no virtualization in MVP, performance monitoring instrumentation only).
@@ -270,6 +276,7 @@ Post-Design Constitution Check: PASS (see updated section below).
 - Mark [P] for parallel execution (independent files)
 
 **Estimated Output**: 42-48 tasks (includes previous scope plus Theme Manager: config, provider, UI section, persistence, event tests, accessibility contrast test, token refactor, fallback handling) in tasks.md
+**Estimated Output Delta (Hierarchy)**: +4–6 tasks (unit BFS level test, integration display test, implementation of level calculator, GraphMetaPanel display, optional caching, documentation update).
 
 **IMPORTANT**: This phase is executed by the /tasks command, NOT by /plan
 
@@ -291,6 +298,15 @@ Post-Design Constitution Check: PASS (see updated section below).
 8. Testing: (a) Contract test ensures themes expose all required keys; (b) Persistence test reloads app state applying stored theme; (c) Accessibility contrast test computes ratio using luminance formula; (d) Snapshot or DOM query test ensures node className / style changes after switch; (e) Event emission test verifying previous/new IDs.
 9. Fallback: If stored theme ID missing from config, log warn, apply default, emit `theme:changed` with `previousTheme = null`.
 10. Performance: Add metric capture around theme switch measuring duration between dispatch and next animation frame paint.
+
+### Node Hierarchy (FR-042) Implementation Strategy
+1. Root Identification: The first created node (existing invariant) is root; store its id in memory when graph loads (first node by created timestamp or first encountered if persisted order matches contract).
+2. Level Computation: On graph load or structural change (node/edge add/delete), run a BFS from root to build a `Map<nodeId, level>`.
+3. Cache Invalidation: Maintain a mutation counter; recompute only when counter changes (increment on node:created,node:deleted,edge:created,edge:deleted events).
+4. Display: Extend `GraphMetaPanel` to show `Level: Root` or `Level: Child N` for selected node (absent selection: hide label).
+5. Edge Cases: Missing root (empty graph) -> show nothing. Cycles: BFS ensures minimum depth; no special handling required.
+6. Tests: (a) Unit test BFS correctness on a small fabricated graph with branching; (b) Integration test: create chain of depth 3 and assert displayed levels; (c) Fan-out test: multiple children of root all show level 1.
+7. Performance: Optional metric mark around BFS if node count > X (future; not mandatory MVP).
 
 ## Complexity Tracking
 *Fill ONLY if Constitution Check has violations that must be justified*

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs } from '../lib/indexeddb';
 import { createNode, createEdge } from '../lib/graph-domain';
 import { NodeRecord, EdgeRecord, GraphRecord } from '../lib/types';
@@ -26,6 +26,9 @@ interface GraphContext extends GraphState {
   startEditing(nodeId: string): void;
   stopEditing(): void;
   pendingChanges: boolean; // coarse indicator for unsaved changes (future: integrate with autosave scheduler)
+  selectedNodeId: string | null;
+  selectNode(id: string | null): void;
+  levels: Map<string, number>;
 }
 
 const Ctx = createContext<GraphContext | null>(null);
@@ -38,6 +41,9 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>('library');
   const [pendingChanges, setPendingChanges] = useState<boolean>(false); // placeholder (would toggle on edits & clear on autosave success)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [levels, setLevels] = useState<Map<string, number>>(new Map());
+  const mutationCounter = useRef(0);
 
   async function refreshList() { setGraphs(await listGraphs()); }
 
@@ -48,6 +54,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const root = createNode({ graphId: g.id, x: 0, y: 0, text: 'New Thought' });
     setNodes([root]);
     setEdges([]);
+  mutationCounter.current++;
     events.emit('graph:created', { graphId: g.id });
     events.emit('node:created', { graphId: g.id, nodeId: root.id });
   void saveNodes(g.id, [root]);
@@ -61,8 +68,10 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setGraph(snap.graph);
       setNodes(snap.nodes);
       setEdges(snap.edges);
+  mutationCounter.current++;
       events.emit('graph:loaded', { graphId: snap.graph.id });
       setView('canvas');
+      setSelectedNodeId(null);
     }
   }, []);
 
@@ -94,6 +103,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!graph) return null;
     const n = createNode({ graphId: graph.id, x, y });
     setNodes(ns => [...ns, n]);
+  mutationCounter.current++;
     events.emit('node:created', { graphId: graph.id, nodeId: n.id });
     void saveNodes(graph.id, [n]);
     return n;
@@ -114,6 +124,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }, 0);
       return [...es, e];
     });
+    if (!exists) mutationCounter.current++;
     if (exists) return;
   }, [graph]);
 
@@ -128,6 +139,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const edge = createEdge({ graphId: graph.id, sourceNodeId, targetNodeId: created.id, sourceHandleId, targetHandleId });
       setNodes(ns => [...ns, created!]);
       setEdges(es => [...es, edge]);
+  mutationCounter.current++;
       // Debug visibility: log creation so we can confirm in browser console.
       // eslint-disable-next-line no-console
       console.debug('[graph-store] addConnectedNode created node+edge', { node: created.id, edge: edge.id, sourceNodeId, targetNodeId: created.id });
@@ -184,11 +196,28 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const startEditing = useCallback((nodeId: string) => { setEditingNodeId(nodeId); }, []);
   const stopEditing = useCallback(() => { setEditingNodeId(null); }, []);
+  const selectNode = useCallback((id: string | null) => { setSelectedNodeId(id); }, []);
+
+  // Hierarchy computation (BFS) when structure changes
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!graph) { if (!cancelled) setLevels(new Map()); return; }
+      try {
+        const mod = await import('../lib/hierarchy');
+        const rootId = mod.findRootNodeId(nodes as any);
+        if (!rootId) { if (!cancelled) setLevels(new Map()); return; }
+        const map = mod.computeLevels(rootId, nodes as any, edges as any);
+        if (!cancelled) setLevels(map);
+      } catch { /* ignore */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph?.id, mutationCounter.current]);
 
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, updateViewport, setNodePositionEphemeral, editingNodeId, startEditing, stopEditing, pendingChanges }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, updateViewport, setNodePositionEphemeral, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

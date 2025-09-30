@@ -76,6 +76,11 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 12. **Given** I am on the Editing Canvas with unsaved (debounced, not yet flushed) changes, **When** I attempt to navigate back to the Map Library, **Then** I am warned about pending unsaved changes and may choose to (a) stay and wait, or (b) discard navigation (future enhancement: force save) before the view actually changes.
 13. **Given** I am on the Editing Canvas, **When** I invoke a "Back to Library" control, **Then** the canvas UI is replaced by the Map Library list; no residual nodes or edges remain visible and performance state (pan/zoom) is reset upon returning to the same map later.
 14. **Given** I create a new map from the Map Library via a "New Map" action, **Then** the library immediately transitions to the Editing Canvas with the freshly created root node focused (Scenario 1), and the new map appears in the library list only after initial auto-save completes.
+15. **Given** a node with visible directional handles (N/S/E/W), **When** I drag the SAME handle outward multiple times sequentially (release each time on empty canvas past threshold), **Then** each drag creates a new distinct child node connected by its own edge to the origin node (fan‑out allowed) with no duplicate edges and with each new node positioned so it does not overlap previously created siblings.
+16. **Given** I have just created a new mind-map, **Then** the automatically created first node is designated as the "Root" node (level = 0) and this designation is shown in the Details pane when it is selected.
+17. **Given** I create a node from the Root node via a directional handle, **Then** that new node is a level 1 ("Child 1") node and its level is shown in the Details pane when selected.
+18. **Given** I create a node from any level N node (N ≥ 1) via a directional handle, **Then** the new node is level N+1 and displays that level in the Details pane (e.g., Child 2, Child 3, etc.).
+19. **Given** I select any node, **Then** the Details pane displays a read‑only field or label indicating its hierarchical level (Root, Child 1, Child 2, ...). If the node has no recorded parent (only the Root), it shows Root.
 
 ### Edge Cases
 - Creating many nodes rapidly (drag spamming) should not produce orphan edges or duplicate node IDs.
@@ -91,6 +96,8 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
  - Theme switching should not alter persisted graph structural data (pure presentation concern); only a user setting is updated.
  - Subtle theme MUST still meet minimum accessibility contrast (WCAG AA for node text vs background >= 4.5:1 for normal text) despite reduced prominence.
  - The Theme Manager placement inside the Details pane MUST visually separate global controls (theme) from per‑graph fields using a divider, heading, or grouping label.
+ - Repeated creation from the same handle (fan-out) MUST be supported; each drag/release beyond threshold spawns a new node+edge pair (no upper hard limit defined in MVP other than performance). Duplicate edges (same source+target) remain disallowed.
+ - Node hierarchy levels: The initial auto-created node is level 0 (Root). Nodes created directly from Root are level 1 (Child 1). Recursively, a node created from level N is level N+1. Display only (does not currently restrict editing or layout). Cycles are not explicitly prevented in MVP; if a cycle is introduced in a future enhancement the lowest discovered path determines display level.
 
 ## Requirements *(mandatory)*
 
@@ -140,6 +147,8 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - **FR-039**: Theme selection MUST persist globally (applies to all maps) across sessions; the active theme MUST load prior to initial canvas render to avoid a flash of incorrect theme (FOIT/FOUT equivalent). Persistence stored in user settings (not per graph) to avoid duplication.
 - **FR-040**: Switching the active theme MUST immediately re-render all nodes and the edit textarea without requiring reload; existing graph data MUST remain unchanged (presentation only). Theme change MUST emit a `theme:changed` event including previousTheme and newTheme.
 - **FR-040a**: The Theme Manager UI MUST visually denote its scope as global (e.g., heading "Global Theme" or badge) and MUST NOT appear intermingled inline with graph metadata fields without a separator.
+- **FR-041**: System MUST allow repeated directional handle drags from the same origin node handle to create multiple distinct connected nodes (fan-out). Each invocation MUST produce exactly one new node+edge pair (subject to distance threshold FR-020). Node placement algorithm MUST avoid direct overlap with existing nodes (nudge or offset strategy). Duplicate edge prevention rules (no two identical source-target pairs) still apply.
+- **FR-042**: System MUST assign and display a hierarchical level for each node in the Details pane: Root (level 0) for the initial node, Child 1 for any node created from Root, and Child N for any node created from a Child (N-1) node. Level computation MAY be derived at runtime using the creation lineage (parent reference captured implicitly by creation edge). Persistence of level is optional (may be recomputed on load). Display is read-only.
 
 Assumptions incorporated from clarifications; remaining open items limited to performance metric formalization and future shortcut design.
 
@@ -164,6 +173,8 @@ interpreting them as bidirectional. Avoids early complexity (arrowheads, reversa
 - Potential future enhancements: keyboard shortcuts, directed edges toggle, multi-device sync.
  - Theme scoping rationale: Chosen as global (user-level) for MVP (FR-039). Per-graph theme override deferred; would require additional field on Graph entity and conflicts with consistent mental model across maps.
    - Details pane integration rationale: Consolidates secondary controls; visual separation (FR-040a) mitigates ambiguity about scope.
+      - Fan-out rationale (FR-041): Brainstorming often needs multiple parallel child thoughts from a single idea; requiring re-selection or alternative gestures would add friction. Sequential handle drags provide a consistent mental model and leverage existing gesture.
+         - Hierarchy display rationale (FR-042): Communicates structural depth during ideation without enforcing a strict tree model; enhances orientation in large maps while keeping underlying edge model undirected for MVP.
 
 ---
 

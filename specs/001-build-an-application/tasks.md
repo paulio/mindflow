@@ -47,6 +47,7 @@
  - [ ] T091 [P] Integration test theme persistence across reload (apply before first paint; no flash) (FR-039) (`tests/integration/theme-persist-reload.spec.ts`)
  - [ ] T092 [P] Integration test Details pane shows Global Theme section separated from graph metadata (FR-040a) (`tests/integration/theme-ui-separation.spec.ts`)
  - [ ] T093 [P] Integration test subtle theme maintains accessibility contrast (computed style ratio >=4.5:1) (FR-038) (`tests/integration/theme-contrast.spec.ts`)
+ - [ ] T108 [P] Integration test node hierarchy levels display (Root, Child 1, Child 2) (FR-042) (`tests/integration/node-level-display.spec.ts`)
 
 ### Unit / Component Tests (Early Core Logic Without Implementation)
 - [X] T021 [P] Unit test graph ID + node/edge uniqueness utilities (`tests/unit/graph-ids.test.ts`)
@@ -62,6 +63,8 @@
  - [ ] T095 [P] Unit test subtle theme contrast ratio calculation >=4.5 (config-level) (`tests/unit/theme-contrast-config.test.ts`)
  - [ ] T096 [P] Unit test theme:changed event emission on switch (`tests/unit/theme-event.test.ts`)
  - [ ] T097 [P] Unit test CSS variable mapping completeness (all semantic keys map to vars) (`tests/unit/theme-css-vars.test.ts`)
+ - [ ] T109 [P] Unit test BFS hierarchy level computation (fan-out & chain) (FR-042) (`tests/unit/node-level-bfs.test.ts`)
+ - [ ] T110 [P] Unit test hierarchy cache invalidation on node/edge mutation (FR-042) (`tests/unit/node-level-cache.test.ts`)
 
 ## Phase 3.3: Core Implementation (ONLY after above tests are added & failing)
 - [X] T025 Implement persistence layer IndexedDB adapter `src/lib/indexeddb.ts` (init stores, CRUD, batch writes)
@@ -98,6 +101,9 @@
  - [ ] T102 Implement Theme Manager UI in Details pane with visual separation header "Global Theme" (FR-036, FR-040a)
  - [ ] T103 Implement fallback invalid stored theme key -> default + warning (FR-039)
  - [ ] T104 Add performance metric capture for theme switch duration (FR-040)
+ - [ ] T111 Implement hierarchy level computation (BFS + cache) (FR-042)
+ - [ ] T112 Display node level in Details pane (GraphMetaPanel) (FR-042)
+ - [ ] T113 Fallback root detection on load (first node by created timestamp) (FR-042)
 
 ## Phase 3.4: Integration
 - [ ] T042 Integrate autosave + event bus into GraphCanvas lifecycle
@@ -125,6 +131,8 @@
  - [ ] T105 Update quickstart/docs for Theme Manager usage & global scope labeling (FR-036..FR-040a)
  - [ ] T106 Add manual validation checklist entries for theme switching, persistence, accessibility contrast
  - [ ] T107 Extend performance overlay to display last theme switch timing metric
+ - [ ] T114 Update quickstart/docs to mention node level display semantics (FR-042)
+ - [ ] T115 Add manual validation checklist entries for hierarchy levels (FR-042)
 
 ## Dependencies
 - Setup (T001-T008) before tests.
@@ -144,6 +152,8 @@
  - Theme integration tests (T090-T093) MUST precede implementation tasks (T098+).
  - Theme unit tests (T094-T097) MUST precede implementation tasks (T098+).
  - Theme implementation ordering: T098 (definitions) → T099 (CSS vars) → T100 (persistence preload) → T101 (provider & events) → T102 (UI) → T103 (fallback) → T104 (performance metric). Docs/polish (T105-T107) after successful integration tests pass.
+ - Hierarchy tests (T108, T109-T110) MUST precede hierarchy implementation tasks (T111-T113).
+ - Hierarchy implementation ordering: T111 (compute + cache) → T113 (root detection integrated) → T112 (Details pane display). Docs/polish (T114-T115) after tests pass.
 
 ## Parallel Execution Examples
 ```

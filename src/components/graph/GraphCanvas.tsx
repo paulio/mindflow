@@ -34,7 +34,7 @@ const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
 };
 
 export const GraphCanvas: React.FC = () => {
-  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addNode, graph, updateViewport } = useGraph();
+  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addNode, graph, updateViewport, selectNode, selectedNodeId } = useGraph();
   // Local React Flow controlled nodes (decoupled from store during drag for stability)
   const [flowNodes, setFlowNodes] = useState<any[]>([]);
   // Initialize / merge store nodes into local state (add new, update labels). Positions updated when not currently dragging.
@@ -159,9 +159,11 @@ export const GraphCanvas: React.FC = () => {
   onEdgesChange={onEdgesChange}
   onNodeDragStop={onNodeDragStop}
         zoomOnDoubleClick={false}
+        onNodeClick={(_, node) => { selectNode(node.id); }}
         onNodeDoubleClick={(e: React.MouseEvent, node: Node) => {
           e.preventDefault();
           e.stopPropagation();
+          selectNode(node.id);
           if (editingNodeId !== node.id) startEditing(node.id);
         }}
   onConnect={onConnect}
