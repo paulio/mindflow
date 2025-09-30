@@ -20,8 +20,66 @@ export const UndoRedoBar: React.FC = () => {
       }}
       aria-label="Undo / Redo toolbar"
     >
-      <button disabled={!canUndo} onClick={undo}>Undo</button>
-      <button disabled={!canRedo} onClick={redo}>Redo</button>
+      <IconButton
+        disabled={!canUndo}
+        onClick={undo}
+        ariaLabel="Undo"
+        title="Undo (Ctrl+Z)"
+          icon={(<svg width="22" height="22" viewBox="0 0 24 24" role="presentation" aria-hidden="true" focusable="false">
+            <path d="M9 7 5 11l4 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M6 11h7.5a3.5 3.5 0 0 1 0 7H10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>)}
+      />
+      <IconButton
+        disabled={!canRedo}
+        onClick={redo}
+        ariaLabel="Redo"
+        title="Redo (Ctrl+Y / Ctrl+Shift+Z)"
+          icon={(<svg width="22" height="22" viewBox="0 0 24 24" role="presentation" aria-hidden="true" focusable="false">
+            <path d="M15 7 19 11l-4 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M18 11h-7.5a3.5 3.5 0 0 0 0 7H14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>)}
+      />
     </div>
   );
 };
+
+interface IconButtonProps {
+  onClick(): void;
+  disabled?: boolean;
+  ariaLabel: string;
+  title?: string;
+  icon: React.ReactNode;
+}
+
+const IconButton: React.FC<IconButtonProps> = ({ onClick, disabled, ariaLabel, title, icon }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    aria-label={ariaLabel}
+    title={title}
+    style={{
+      width: 40,
+      height: 40,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: disabled ? '#1e222b' : '#1a1d25',
+      color: disabled ? '#555' : '#e0e6f0',
+      border: '1px solid #2d313b',
+      borderRadius: 6,
+      cursor: disabled ? 'not-allowed' : 'pointer',
+      padding: 0,
+      transition: 'background .15s, color .15s, border .15s'
+    }}
+    onKeyDown={(e) => {
+      if ((e.key === 'Enter' || e.key === ' ') && !disabled) {
+        e.preventDefault();
+        onClick();
+      }
+    }}
+  >
+    {icon}
+  </button>
+);
