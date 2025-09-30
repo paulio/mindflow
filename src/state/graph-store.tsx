@@ -21,6 +21,7 @@ interface GraphContext extends GraphState {
   updateViewport(x: number, y: number, zoom: number): void;
   // Ephemeral position update during drag (no persistence, no lastModified update)
   setNodePositionEphemeral(nodeId: string, x: number, y: number): void;
+  deleteNode(nodeId: string): void; // FR-043 deletion with re-parenting
   // Centralized edit focus management so ReactFlow re-renders do not lose edit mode when selection changes.
   editingNodeId: string | null;
   startEditing(nodeId: string): void;
@@ -189,6 +190,98 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     updateGraphMeta(graph.id, { viewport: { x, y, zoom } }).catch(()=>{});
   }, [graph]);
 
+  // FR-043: Delete node with hierarchical re-parenting of its children.
+  const deleteNode = useCallback((nodeId: string) => {
+    if (!graph) return;
+    // root cannot be deleted (FR-043a)
+    const rootId = (() => {
+      let earliest: NodeRecord | null = null;
+      for (const n of nodes) { if (!earliest || n.created < earliest.created) earliest = n; }
+      return earliest?.id || null;
+    })();
+    if (nodeId === rootId) return; // no-op for root
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    // Build adjacency for neighbor detection (undirected)
+    const adjacency = new Map<string, Set<string>>();
+    function link(a: string, b: string) { (adjacency.get(a) || adjacency.set(a, new Set()).get(a)!).add(b); }
+    for (const e of edges) { link(e.sourceNodeId, e.targetNodeId); link(e.targetNodeId, e.sourceNodeId); }
+    const level = levels; // already cached map from provider effect
+    const nodeLevel = level.get(nodeId);
+    // If no levels known or node has no level, fallback: simple deletion without re-parent (safety)
+    if (nodeLevel === undefined) {
+      setNodes(ns => ns.filter(n => n.id !== nodeId));
+      setEdges(es => es.filter(e => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId));
+      mutationCounter.current++;
+      if (selectedNodeId === nodeId) setSelectedNodeId(null);
+      if (editingNodeId === nodeId) setEditingNodeId(null);
+      events.emit('node:deleted', { graphId: graph.id, nodeId });
+      return;
+    }
+    // Determine parent candidates: neighbors with smaller level
+    const neighbors = Array.from(adjacency.get(nodeId) || []);
+    const parentCandidates = neighbors.filter(n => (level.get(n) ?? Infinity) < nodeLevel);
+    // Choose deterministic parent: smallest level then earliest created timestamp
+    let parentId: string | null = null;
+    if (parentCandidates.length) {
+      parentId = parentCandidates.reduce((best, cur) => {
+        if (!best) return cur;
+        const lb = level.get(best)!; const lc = level.get(cur)!;
+        if (lc < lb) return cur;
+        if (lc > lb) return best;
+        // tie by created timestamp
+        const nb = nodes.find(n => n.id === best)!; const nc = nodes.find(n => n.id === cur)!;
+        if (nc.created < nb.created) return cur;
+        return best;
+      }, '' as string);
+    }
+    if (!parentId) {
+      // No parent (isolated or cycle scenario) -> simple delete
+      setNodes(ns => ns.filter(n => n.id !== nodeId));
+      setEdges(es => es.filter(e => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId));
+      mutationCounter.current++;
+      if (selectedNodeId === nodeId) setSelectedNodeId(null);
+      if (editingNodeId === nodeId) setEditingNodeId(null);
+      events.emit('node:deleted', { graphId: graph.id, nodeId });
+      return;
+    }
+    // Children: neighbors with level = nodeLevel + 1
+    const childIds = neighbors.filter(n => level.get(n) === nodeLevel + 1);
+    // Prepare diff
+    const incidentEdgeIds = new Set<string>();
+    const remainingEdges: EdgeRecord[] = [];
+    for (const e of edges) {
+      if (e.sourceNodeId === nodeId || e.targetNodeId === nodeId) { incidentEdgeIds.add(e.id); continue; }
+      remainingEdges.push(e);
+    }
+    const newEdges: EdgeRecord[] = [];
+    // Helper to check existing connectivity (undirected)
+    function hasEdge(a: string, b: string) {
+      return remainingEdges.some(e => (e.sourceNodeId === a && e.targetNodeId === b) || (e.sourceNodeId === b && e.targetNodeId === a));
+    }
+    for (const childId of childIds) {
+      if (childId === parentId) continue; // safety
+      if (hasEdge(parentId, childId)) continue; // duplicate prevention (FR-043b)
+      try {
+        const e = createEdge({ graphId: graph.id, sourceNodeId: parentId, targetNodeId: childId });
+        newEdges.push(e);
+      } catch { /* ignore */ }
+    }
+    // Commit atomically
+  setNodes(ns => ns.filter(n => n.id !== nodeId));
+  setEdges(es => [...remainingEdges, ...newEdges]);
+    mutationCounter.current++;
+  if (selectedNodeId === nodeId) setSelectedNodeId(null);
+  if (editingNodeId === nodeId) setEditingNodeId(null);
+    // Ordered events: node:deleted then edge:created sorted by child id (FR-043c)
+    events.emit('node:deleted', { graphId: graph.id, nodeId });
+    const sortedNew = [...newEdges].sort((a, b) => a.targetNodeId.localeCompare(b.targetNodeId));
+    for (const e of sortedNew) { events.emit('edge:created', { graphId: graph.id, edgeId: e.id }); }
+    // Persistence (best-effort asynchronous)
+    void saveNodes(graph.id, nodes.filter(n => n.id !== nodeId));
+    if (newEdges.length) void saveEdges(graph.id, newEdges);
+  }, [graph, nodes, edges, levels, selectedNodeId, editingNodeId]);
+
   const setNodePositionEphemeral = useCallback((nodeId: string, x: number, y: number) => {
     if (!graph) return;
     setNodes(ns => ns.map(n => n.id === nodeId ? { ...n, x: Math.round(x), y: Math.round(y) } : n));
@@ -217,7 +310,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, updateViewport, setNodePositionEphemeral, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

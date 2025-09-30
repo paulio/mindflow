@@ -21,6 +21,8 @@
 - [X] T011 [P] Contract test events emission shape (`tests/contract/events-contract.test.ts`) – mock emitter verifies required payload keys
  - [ ] T088 [P] Contract test theme:changed event schema (`tests/contract/theme-event-contract.test.ts`) – ensure payload includes previousTheme (nullable), newTheme (required), timestamp
  - [ ] T089 [P] Contract test theme definitions completeness (`tests/contract/themes-config.test.ts`) – assert each theme exports required semantic keys (nodeBg,nodeBorderColor,nodeBorderWidth,nodeTextColor,handleSourceColor,handleTargetColor,selectionOutline,editorBg,editorTextColor)
+ - [ ] T116 [P] Contract test deletion event ordering (FR-043c) (`tests/contract/deletion-event-order.test.ts`) – simulate deletion, assert sequence: node:deleted then edge:created[*] (sorted by child id)
+ - [ ] T117 [P] Contract test root deletion prohibition (FR-043a) (`tests/contract/root-delete-prohibit.test.ts`) – attempt root delete, assert no node:deleted event & operation returns no-op
 
 ### Integration Tests (User Scenarios & Validation Checklist)
 - [X] T012 [P] Integration test create first node & autosave (`tests/integration/create-first-node.spec.ts`)
@@ -48,6 +50,10 @@
  - [ ] T092 [P] Integration test Details pane shows Global Theme section separated from graph metadata (FR-040a) (`tests/integration/theme-ui-separation.spec.ts`)
  - [ ] T093 [P] Integration test subtle theme maintains accessibility contrast (computed style ratio >=4.5:1) (FR-038) (`tests/integration/theme-contrast.spec.ts`)
  - [ ] T108 [P] Integration test node hierarchy levels display (Root, Child 1, Child 2) (FR-042) (`tests/integration/node-level-display.spec.ts`)
+ - [ ] T118 [P] Integration test delete non-root re-parents children (FR-043, FR-043b) (`tests/integration/delete-node-reparent.spec.ts`)
+ - [ ] T119 [P] Integration test root deletion disabled (UI control + blocked action) (FR-043a) (`tests/integration/root-delete-disabled.spec.ts`)
+ - [ ] T120 [P] Integration test duplicate edge prevention on deletion (existing parent-child edge not duplicated) (FR-043b) (`tests/integration/delete-duplicate-prevention.spec.ts`)
+ - [ ] T121 [P] Integration test deletion performance multi-child (<100ms d<=50) (FR-043 performance) (`tests/integration/delete-perf.spec.ts`)
 
 ### Unit / Component Tests (Early Core Logic Without Implementation)
 - [X] T021 [P] Unit test graph ID + node/edge uniqueness utilities (`tests/unit/graph-ids.test.ts`)
@@ -65,6 +71,10 @@
  - [ ] T097 [P] Unit test CSS variable mapping completeness (all semantic keys map to vars) (`tests/unit/theme-css-vars.test.ts`)
  - [ ] T109 [P] Unit test BFS hierarchy level computation (fan-out & chain) (FR-042) (`tests/unit/node-level-bfs.test.ts`)
  - [ ] T110 [P] Unit test hierarchy cache invalidation on node/edge mutation (FR-042) (`tests/unit/node-level-cache.test.ts`)
+ - [ ] T122 [P] Unit test re-parent algorithm basic fan-out (FR-043b) (`tests/unit/reparent-basic.test.ts`)
+ - [ ] T123 [P] Unit test deterministic parent selection tie-break (earliest created) (FR-043b) (`tests/unit/reparent-parent-select.test.ts`)
+ - [ ] T124 [P] Unit test atomic rollback on simulated failure (inject error before commit) (FR-043) (`tests/unit/reparent-atomic-rollback.test.ts`)
+ - [ ] T125 [P] Unit test duplicate edge skip logic (FR-043b) (`tests/unit/reparent-duplicate-skip.test.ts`)
 
 ## Phase 3.3: Core Implementation (ONLY after above tests are added & failing)
 - [X] T025 Implement persistence layer IndexedDB adapter `src/lib/indexeddb.ts` (init stores, CRUD, batch writes)
@@ -104,6 +114,11 @@
  - [ ] T111 Implement hierarchy level computation (BFS + cache) (FR-042)
  - [ ] T112 Display node level in Details pane (GraphMetaPanel) (FR-042)
  - [ ] T113 Fallback root detection on load (first node by created timestamp) (FR-042)
+ - [ ] T126 Implement deletion domain logic (parent/children resolution, edge diff, validation) (FR-043..FR-043c)
+ - [ ] T127 Implement trash-can UI control (selected node overlay, disabled for root) (FR-043a)
+ - [ ] T128 Implement ordered event emission (node:deleted then edge:created) & update types (FR-043c)
+ - [ ] T129 Integrate hierarchy cache invalidation & mutation counter increment on deletion (FR-043)
+ - [ ] T130 (Backlog) Wrap deletion as single undo/redo compound action (FR-043) – optional post-MVP
 
 ## Phase 3.4: Integration
 - [ ] T042 Integrate autosave + event bus into GraphCanvas lifecycle
@@ -133,6 +148,10 @@
  - [ ] T107 Extend performance overlay to display last theme switch timing metric
  - [ ] T114 Update quickstart/docs to mention node level display semantics (FR-042)
  - [ ] T115 Add manual validation checklist entries for hierarchy levels (FR-042)
+ - [ ] T131 Update events contract doc for deletion ordering & root prohibition (FR-043c, FR-043a)
+ - [ ] T132 Update quickstart/docs for node deletion & re-parent semantics (FR-043..FR-043b)
+ - [ ] T133 Add manual validation checklist entries for deletion scenarios & performance target (FR-043)
+ - [ ] T134 Add performance metric (mark/measure) around deletion operation (FR-043 performance)
 
 ## Dependencies
 - Setup (T001-T008) before tests.
@@ -154,6 +173,8 @@
  - Theme implementation ordering: T098 (definitions) → T099 (CSS vars) → T100 (persistence preload) → T101 (provider & events) → T102 (UI) → T103 (fallback) → T104 (performance metric). Docs/polish (T105-T107) after successful integration tests pass.
  - Hierarchy tests (T108, T109-T110) MUST precede hierarchy implementation tasks (T111-T113).
  - Hierarchy implementation ordering: T111 (compute + cache) → T113 (root detection integrated) → T112 (Details pane display). Docs/polish (T114-T115) after tests pass.
+ - Deletion tests (T116-T125) MUST precede deletion implementation tasks (T126-T129).
+ - Deletion implementation ordering: T126 (domain logic) → T127 (UI control) → T128 (ordered events) → T129 (cache invalidation ensure) → (optional) T130 (undo compound). Docs/polish (T131-T133) + performance metric (T134) after stable implementation & passing tests.
 
 ## Parallel Execution Examples
 ```

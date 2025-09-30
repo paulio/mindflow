@@ -50,6 +50,7 @@ and accessibility targets derived from constitution and preliminary assumptions.
 10. Added FR-036..FR-040a introducing a global Theme Manager (accessible through Details pane) with two initial themes (classic & subtle), global (not per-graph) persistence, immediate re-render on switch, accessibility contrast requirements, and explicit UI separation within the Details pane to convey scope.
 11. Added FR-041 enabling repeated directional handle drags (fan-out) (already supported; requirement formalized).
 12. Added FR-042 introducing hierarchical node levels (Root = level 0, Child N) with display in Details pane only (computed, not persisted required).
+13. Added FR-043..FR-043c defining node deletion with hierarchical re-parenting (non-Root only), root delete prohibition, duplicate edge avoidance, atomicity, and ordered event emission.
 
 Plan adjustments (delta):
 - Add integration test: reposition node (drag) updates position & edges live; persists after drop (FR-025 / Scenario #10).
@@ -75,6 +76,8 @@ Plan adjustments (delta):
  - Add subtle theme design validation step (manual + automated contrast assertion) before finalizing tokens.
  - Add hierarchy computation & display: derive level via BFS from root (first created node) at runtime; no schema change. Provide selector in GraphMetaPanel to show read-only "Level: Root | Child 1 | Child 2...".
  - Add tests: unit BFS level derivation; integration selecting nodes shows correct levels.
+ - Add node deletion + re-parenting: UI trash-can control near selected node (disabled for root); domain operation to remove node, create new edges from parent to each child, remove original edges, preserve grandchildren; event emission order deterministic.
+ - Add tests: unit re-parent algorithm (duplicate edge prevention, cycle safety, atomic failure rollback), integration delete non-root, integration root delete disabled, integration multi-child performance.
 
 ## Technical Context
 **Language/Version**: TypeScript (ES2022 target) via Vite + React 18
@@ -86,8 +89,10 @@ Plan adjustments (delta):
 **View Architecture**: Two top-level application states: (1) Map Library (non-interactive list & management actions) and (2) Editing Canvas (ReactFlow graph for one active map). Transitions: Open Map, New Map (create→auto-transition), Back to Library. Each map persists its own viewport (pan, zoom level) alongside metadata and restores it on open; library operations on other maps leave the active canvas state untouched until an explicit load.
 **Theme Architecture (NEW)**: Global theme (user-level) applied at app root via a `data-theme` attribute or root class (e.g., `.theme-classic`, `.theme-subtle`). Theme selection persists in a lightweight `settings` store (IndexedDB record) loaded before first paint (apply stored theme synchronously to avoid flash). The Details pane hosts a "Global Theme" section (visually separated) listing radio buttons or segmented control for available themes. A theme switch updates CSS custom properties (token layer) driving node background, border width/color, text color, handle colors, selection outline, and textarea styles. Switching emits `theme:changed { previousTheme, newTheme, ts }`. Invalid stored theme keys fall back to default `classic` and emit a logged warning (non-blocking). Accessibility guard: subtle theme tokens must maintain ≥4.5:1 contrast for node text vs background (validated via test computing contrast ratio from computed hex values in config).
 **Hierarchy Display Architecture (NEW)**: Treat the first (root) node as level 0. For any other node, compute level as the length of the shortest undirected path to root using existing edges. Because edges are undirected, a simple BFS from root each time selection changes (or memoized until graph mutates) yields levels. No persistence required; recompute on load. In presence of cycles (not prevented), BFS still produces minimum depth, which we display. The Details pane adds a read-only label (e.g., "Level: Root" or "Level: Child 3"). Performance: For typical graphs (<1000 nodes) BFS O(N+E) on selection is acceptable; optional future optimization: cache level map invalidated on node/edge mutation events.
+**Deletion & Re-parenting Architecture (NEW)**: Deleting a non-Root node removes the node and its incident edges, then for every direct child (nodes for which the deleted node was an immediate neighbor along the creation path) we add an edge from the deleted node's parent to that child if one does not already exist. Because edges are undirected, parent/child semantics are inferred from breadth-first levels: parent candidates are neighbors with lower level. Operation steps: (1) Identify parent (one neighbor with smallest level; if multiple, choose earliest created for determinism). (2) Collect children (neighbors with level = deleted level + 1). (3) Validate new edges (skip duplicates). (4) Apply changes atomically (temp structures then commit). (5) Emit events: node:deleted then edge:created for each new edge sorted by child node id. Root deletion returns early with no-op. UI exposes a trash-can button positioned with consistent offset relative to node bounding box; disabled state for root includes aria-disabled.
 **Performance Goals**: 500-node cold load <1500ms; warm load <500ms; autosave p95 <150ms; frame render avg <40ms p95 <80ms during pan/zoom.
 **Hierarchy Performance Considerations**: Level computation triggered on node/edge mutation or selection. Cache with a version counter (increment on structural mutating events) to prevent redundant BFS. Expected BFS time << 10ms for 500 nodes; measure and add metric flag if >16ms (future optimization threshold).
+**Deletion Performance Considerations**: Re-parent deletion touches O(d) edges (d = number of direct children). For large fan-out (d ~ 200) ensure batch state update uses a single setState functional update for nodes/edges and a single persistence batch (future optimization). Target <100ms wall time for d <= 200 on mid-tier hardware. Avoid recomputing full BFS multiple times; rely on existing cached levels and increment mutation counter once.
 **Theme Performance Considerations**: Theme switch MUST avoid per-node React re-render cascade where possible—prefer CSS variable swap for majority of visual changes. Node component only re-renders if theme-dependent logic (e.g., conditional class) requires it. Target <1 frame (<16ms) style recalculation on mid-size graph (≈200 nodes). Measure using PerformanceOverlay (extend existing metrics module to time theme switch).
 **Constraints**: Offline-capable; storage warning if >5MB; node text <=255 chars; undo depth 10; no multi-tab sync.
 **Scale/Scope**: MVP single-user local graphs; up to ~1000 nodes (no virtualization in MVP, performance monitoring instrumentation only).
@@ -277,6 +282,7 @@ Post-Design Constitution Check: PASS (see updated section below).
 
 **Estimated Output**: 42-48 tasks (includes previous scope plus Theme Manager: config, provider, UI section, persistence, event tests, accessibility contrast test, token refactor, fallback handling) in tasks.md
 **Estimated Output Delta (Hierarchy)**: +4–6 tasks (unit BFS level test, integration display test, implementation of level calculator, GraphMetaPanel display, optional caching, documentation update).
+**Estimated Output Delta (Deletion)**: +6–8 tasks (unit re-parent algorithm, integration delete non-root, integration root disabled, duplicate edge prevention test, atomic rollback test, UI control implementation, docs & manual validation updates).
 
 **IMPORTANT**: This phase is executed by the /tasks command, NOT by /plan
 
@@ -307,6 +313,16 @@ Post-Design Constitution Check: PASS (see updated section below).
 5. Edge Cases: Missing root (empty graph) -> show nothing. Cycles: BFS ensures minimum depth; no special handling required.
 6. Tests: (a) Unit test BFS correctness on a small fabricated graph with branching; (b) Integration test: create chain of depth 3 and assert displayed levels; (c) Fan-out test: multiple children of root all show level 1.
 7. Performance: Optional metric mark around BFS if node count > X (future; not mandatory MVP).
+
+### Node Deletion & Re-parenting (FR-043..FR-043c) Implementation Strategy
+1. UI Control: Render a trash-can button absolutely positioned near selected node (z-index above canvas). Compute screen position from node coordinates + current viewport transform (or leverage ReactFlow node internals). Disabled styling & aria-disabled when root.
+2. Parent Resolution: Using cached levels, find neighbors with level = (nodeLevel - 1). If >1, choose deterministic: lowest level (should be unique) then earliest created timestamp as tie-breaker.
+3. Child Collection: Neighbors with level = (nodeLevel + 1). Ignore nodes not strictly at next level to avoid unintended structural rewiring.
+4. Atomic Plan: Build arrays of (edgesToAdd, edgesToRemove, nodeToRemove). Validate no new edge duplicates existing. If validation fails mid-way (e.g., capacity or invariant), abort without mutating state.
+5. State Commit: Single batched setState: remove node, remove its incident edges, append new edges. Persist via existing saveEdges / (future: batched persistence). Emit events in defined order.
+6. Undo/Redo Consideration: Represent as a compound action (future enhancement). MVP: treat as multiple granular events; optional backlog to wrap into single undo entry.
+7. Tests: (a) Unit test algorithm with constructed mini-graph; (b) Integration test deleting Child 2 re-parents grandchildren; (c) Root delete disabled; (d) Duplicate edge preventing (already existing parent-child link) maintains single edge.
+8. Performance: Add optional measurement around deletion operation for large fan-out (mark before/after state commit).
 
 ## Complexity Tracking
 *Fill ONLY if Constitution Check has violations that must be justified*

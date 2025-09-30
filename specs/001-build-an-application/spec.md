@@ -81,6 +81,9 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 17. **Given** I create a node from the Root node via a directional handle, **Then** that new node is a level 1 ("Child 1") node and its level is shown in the Details pane when selected.
 18. **Given** I create a node from any level N node (N ≥ 1) via a directional handle, **Then** the new node is level N+1 and displays that level in the Details pane (e.g., Child 2, Child 3, etc.).
 19. **Given** I select any node, **Then** the Details pane displays a read‑only field or label indicating its hierarchical level (Root, Child 1, Child 2, ...). If the node has no recorded parent (only the Root), it shows Root.
+20. **Given** a non-Root node is selected, **Then** a trash‑can delete control appears adjacent to (but not overlapping) the node; **When** I activate (click/tap/press Enter on) the control and confirm (if a confirmation affordance is required), **Then** the node is deleted and each of its direct children (former level N+1) is re‑parented to the deleted node’s parent (now connected directly to level N‑1) without losing their own subtrees.
+21. **Given** the Root node is selected, **Then** the trash‑can delete control is shown in a visibly disabled state (ARIA disabled, no pointer activation) and any attempt to activate it is ignored (no deletion occurs).
+22. **Given** I delete a node that has multiple children, **Then** all children become siblings under the deleted node’s parent and no duplicate edges are created (existing edges that would become duplicates are not re-added).
 
 ### Edge Cases
 - Creating many nodes rapidly (drag spamming) should not produce orphan edges or duplicate node IDs.
@@ -98,6 +101,12 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
  - The Theme Manager placement inside the Details pane MUST visually separate global controls (theme) from per‑graph fields using a divider, heading, or grouping label.
  - Repeated creation from the same handle (fan-out) MUST be supported; each drag/release beyond threshold spawns a new node+edge pair (no upper hard limit defined in MVP other than performance). Duplicate edges (same source+target) remain disallowed.
  - Node hierarchy levels: The initial auto-created node is level 0 (Root). Nodes created directly from Root are level 1 (Child 1). Recursively, a node created from level N is level N+1. Display only (does not currently restrict editing or layout). Cycles are not explicitly prevented in MVP; if a cycle is introduced in a future enhancement the lowest discovered path determines display level.
+ - Node deletion re-parenting: Deleting a non-Root node promotes all its direct children to connect to that node's parent (maintaining breadth). No child (subtree) data is lost. Root deletion is disallowed.
+ - Re-parent operation MUST be atomic: either all new parent-child edges are established and the original node + its original edges are removed, or nothing changes (failure roll-back).
+ - Duplicate edge prevention: If a re-parent edge already exists (parent already connected to child), do not create a second edge.
+ - Visual affordance: Delete control should not obscure node text or directional handles and should remain within a predictable offset (implementation-defined) so users can reliably target it.
+ - Accessibility: Disabled Root delete control MUST expose appropriate disabled semantics (e.g., aria-disabled="true").
+ - Large fan-out delete: Re-parenting of a node with many children (e.g., >50) should still operate within acceptable performance (target <100ms) and not degrade autosave behavior.
 
 ## Requirements *(mandatory)*
 
@@ -149,6 +158,10 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - **FR-040a**: The Theme Manager UI MUST visually denote its scope as global (e.g., heading "Global Theme" or badge) and MUST NOT appear intermingled inline with graph metadata fields without a separator.
 - **FR-041**: System MUST allow repeated directional handle drags from the same origin node handle to create multiple distinct connected nodes (fan-out). Each invocation MUST produce exactly one new node+edge pair (subject to distance threshold FR-020). Node placement algorithm MUST avoid direct overlap with existing nodes (nudge or offset strategy). Duplicate edge prevention rules (no two identical source-target pairs) still apply.
 - **FR-042**: System MUST assign and display a hierarchical level for each node in the Details pane: Root (level 0) for the initial node, Child 1 for any node created from Root, and Child N for any node created from a Child (N-1) node. Level computation MAY be derived at runtime using the creation lineage (parent reference captured implicitly by creation edge). Persistence of level is optional (may be recomputed on load). Display is read-only.
+- **FR-043**: System MUST allow deletion of any non-Root node via a contextual trash‑can control shown only when that node is selected. Upon deletion, all direct children of the deleted node MUST be re‑parented to the deleted node’s parent (their new source) preserving their own children (transitive subtree unchanged) and preventing data loss.
+- **FR-043a**: Root node deletion MUST be disallowed. The UI MUST display a disabled trash‑can control when Root is selected to communicate the action is not permitted.
+- **FR-043b**: Re-parenting during deletion MUST avoid creating duplicate edges (same source + target). If an edge would duplicate one already existing, it is skipped. Operation MUST be atomic: if any new required edge cannot be created, the deletion aborts and original structure remains.
+- **FR-043c**: Re-parent delete operation MUST emit node:deleted events for the removed node followed by edge:created events (only for newly added edges) in a deterministic order (stable sort by child node id ascending) to support predictable undo/redo ordering.
 
 Assumptions incorporated from clarifications; remaining open items limited to performance metric formalization and future shortcut design.
 
@@ -175,6 +188,7 @@ interpreting them as bidirectional. Avoids early complexity (arrowheads, reversa
    - Details pane integration rationale: Consolidates secondary controls; visual separation (FR-040a) mitigates ambiguity about scope.
       - Fan-out rationale (FR-041): Brainstorming often needs multiple parallel child thoughts from a single idea; requiring re-selection or alternative gestures would add friction. Sequential handle drags provide a consistent mental model and leverage existing gesture.
          - Hierarchy display rationale (FR-042): Communicates structural depth during ideation without enforcing a strict tree model; enhances orientation in large maps while keeping underlying edge model undirected for MVP.
+         - Node re-parent deletion rationale (FR-043…): Enables iterative refinement without structural data loss—users can collapse intermediate nodes while preserving downstream thought branches, reducing the need for manual reconnecting.
 
 ---
 

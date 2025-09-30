@@ -4,7 +4,15 @@ import { useGraph } from '../../state/graph-store';
 
 interface Props { id: string; text: string; selected?: boolean; }
 export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
-  const { updateNodeText, editingNodeId, startEditing, stopEditing } = useGraph();
+  const { updateNodeText, editingNodeId, startEditing, stopEditing, deleteNode, nodes } = useGraph() as any;
+  // Root detection: earliest created node id among all nodes
+  const rootId = React.useMemo(() => {
+    if (!nodes?.length) return null;
+    let earliest = nodes[0];
+    for (const n of nodes) { if (n.created < earliest.created) earliest = n; }
+    return earliest.id;
+  }, [nodes]);
+  const isRoot = id === rootId;
   const editing = editingNodeId === id;
   const [draft, setDraft] = useState(text);
   const textareaRef = useRef<HTMLTextAreaElement|null>(null);
@@ -96,6 +104,34 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
         />
       ) : (
         <span style={{ whiteSpace:'pre-wrap', display:'block', textAlign:'center' }}>{text || 'New Thought'}</span>
+      )}
+      {selected && !editing && (
+        <button
+          type="button"
+          aria-label={isRoot ? 'Root node cannot be deleted' : 'Delete node'}
+          disabled={isRoot}
+          onClick={(e) => { e.stopPropagation(); if (!isRoot) deleteNode(id); }}
+          style={{
+            position: 'absolute',
+            top: -10,
+            right: -10,
+            width: 20,
+            height: 20,
+            borderRadius: '50%',
+            border: '1px solid var(--mf-node-border)',
+            background: isRoot ? 'rgba(255,255,255,0.1)' : 'var(--mf-node-bg)',
+            color: 'var(--mf-node-text)',
+            fontSize: 12,
+            cursor: isRoot ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 0 0 1px #000',
+            zIndex: 10
+          }}
+        >
+          ×
+        </button>
       )}
     </div>
   );
