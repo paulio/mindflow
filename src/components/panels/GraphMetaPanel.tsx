@@ -94,15 +94,106 @@ export const GraphMetaPanel: React.FC = () => {
               <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                 <strong style={{ fontSize:12 }}>Text Align</strong>
                 <div style={{ display:'flex', gap:4 }}>
-                  {(['left','center','right'] as const).map(opt => (
-                    <button key={opt} type="button" onClick={() => updateNoteAlignment(node.id, opt, undefined)} disabled={hAlign === opt} style={{ padding:'4px 6px', fontSize:11, background: hAlign === opt ? '#3a3f4b' : '#222', color:'#fff', border:'1px solid #444', cursor: hAlign === opt ? 'default' : 'pointer' }}>{opt[0].toUpperCase()}</button>
-                  ))}
+                  {(['left','center','right'] as const).map(opt => {
+                    const active = hAlign === opt;
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        aria-label={`Align ${opt}`}
+                        onClick={() => updateNoteAlignment(node.id, opt, undefined)}
+                        disabled={active}
+                        style={{
+                          padding:4,
+                          width:36,
+                          height:32,
+                          background: active ? '#3a3f4b' : '#222',
+                          color:'#fff',
+                          border:'1px solid #444',
+                          cursor: active ? 'default' : 'pointer',
+                          display:'flex',
+                          alignItems:'center',
+                          justifyContent:'center'
+                        }}
+                      >
+                        <svg width="24" height="24" viewBox="0 0 24 24" role="presentation" aria-hidden="true" focusable="false">
+                          {/* Container guide (optional faint) */}
+                          <rect x="3.5" y="4" width="17" height="16" rx="2" stroke="currentColor" strokeWidth="1" opacity="0.25" fill="none" />
+                          {opt === 'left' && (
+                            <>
+                              <path d="M6 8h9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                              <path d="M6 12h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                              <path d="M6 16h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                            </>
+                          )}
+                          {opt === 'center' && (
+                            <>
+                              <path d="M7 8h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                              <path d="M9 12h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                              <path d="M6 16h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                            </>
+                          )}
+                          {opt === 'right' && (
+                            <>
+                              <path d="M9 8h9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                              <path d="M12 12h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                              <path d="M10 16h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                            </>
+                          )}
+                        </svg>
+                      </button>
+                    );
+                  })}
                 </div>
                 <strong style={{ fontSize:12 }}>Vertical</strong>
                 <div style={{ display:'flex', gap:4 }}>
-                  {([['top','Top'],['middle','Mid'],['bottom','Bot']] as const).map(([val,label]) => (
-                    <button key={val} type="button" onClick={() => updateNoteAlignment(node.id, undefined, val as any)} disabled={vAlign === val} style={{ padding:'4px 6px', fontSize:11, background: vAlign === val ? '#3a3f4b' : '#222', color:'#fff', border:'1px solid #444', cursor: vAlign === val ? 'default' : 'pointer' }}>{label}</button>
-                  ))}
+                  {([['top','Top'],['middle','Middle'],['bottom','Bottom']] as const).map(([val,label]) => {
+                    const active = vAlign === val;
+                    return (
+                      <button
+                        key={val}
+                        type="button"
+                        aria-label={`Align vertical ${label}`}
+                        onClick={() => updateNoteAlignment(node.id, undefined, val as any)}
+                        disabled={active}
+                        style={{
+                          padding:4,
+                          width:36,
+                          height:32,
+                          background: active ? '#3a3f4b' : '#222',
+                          color:'#fff',
+                          border:'1px solid #444',
+                          cursor: active ? 'default' : 'pointer',
+                          display:'flex',
+                          alignItems:'center',
+                          justifyContent:'center'
+                        }}
+                      >
+                        <svg width="24" height="24" viewBox="0 0 24 24" role="presentation" aria-hidden="true" focusable="false">
+                          <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1" opacity="0.25" fill="none" />
+                          {val === 'top' && (
+                            <>
+                              <rect x="7" y="6.5" width="10" height="3.5" rx="1" fill="currentColor" opacity="0.8" />
+                              <rect x="9" y="12" width="6" height="3" rx="1" fill="currentColor" opacity="0.4" />
+                            </>
+                          )}
+                          {val === 'middle' && (
+                            <>
+                              <rect x="7" y="10" width="10" height="4" rx="1" fill="currentColor" opacity="0.8" />
+                              <rect x="9" y="6.5" width="6" height="3" rx="1" fill="currentColor" opacity="0.4" />
+                              <rect x="9" y="15.5" width="6" height="3" rx="1" fill="currentColor" opacity="0.4" />
+                            </>
+                          )}
+                          {val === 'bottom' && (
+                            <>
+                              <rect x="7" y="14.5" width="10" height="3.5" rx="1" fill="currentColor" opacity="0.8" />
+                              <rect x="9" y="8.5" width="6" height="3" rx="1" fill="currentColor" opacity="0.4" />
+                            </>
+                          )}
+                        </svg>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
