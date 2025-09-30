@@ -23,6 +23,8 @@
  - [ ] T089 [P] Contract test theme definitions completeness (`tests/contract/themes-config.test.ts`) – assert each theme exports required semantic keys (nodeBg,nodeBorderColor,nodeBorderWidth,nodeTextColor,handleSourceColor,handleTargetColor,selectionOutline,editorBg,editorTextColor)
  - [ ] T116 [P] Contract test deletion event ordering (FR-043c) (`tests/contract/deletion-event-order.test.ts`) – simulate deletion, assert sequence: node:deleted then edge:created[*] (sorted by child id)
  - [ ] T117 [P] Contract test root deletion prohibition (FR-043a) (`tests/contract/root-delete-prohibit.test.ts`) – attempt root delete, assert no node:deleted event & operation returns no-op
+ - [ ] T135 [P] Contract test export markdown structure (FR-045b) (`tests/contract/export-markdown-contract.test.ts`) – given small graph, exported markdown lines match bullet hierarchy spec (Root, indented children)
+ - [ ] T136 [P] Contract test export PNG metadata (FR-045a) (`tests/contract/export-png-metadata.test.ts`) – stub canvas, assert filename pattern `<graph-name>.png` and no structural events emitted
 
 ### Integration Tests (User Scenarios & Validation Checklist)
 - [X] T012 [P] Integration test create first node & autosave (`tests/integration/create-first-node.spec.ts`)
@@ -54,6 +56,9 @@
  - [ ] T119 [P] Integration test root deletion disabled (UI control + blocked action) (FR-043a) (`tests/integration/root-delete-disabled.spec.ts`)
  - [ ] T120 [P] Integration test duplicate edge prevention on deletion (existing parent-child edge not duplicated) (FR-043b) (`tests/integration/delete-duplicate-prevention.spec.ts`)
  - [ ] T121 [P] Integration test deletion performance multi-child (<100ms d<=50) (FR-043 performance) (`tests/integration/delete-perf.spec.ts`)
+ - [ ] T137 [P] Integration test delete map via Details pane returns to library (FR-044) (`tests/integration/delete-map-details-pane.spec.ts`)
+ - [ ] T138 [P] Integration test export PNG triggers download (blob URL intercepted) (FR-045a) (`tests/integration/export-png.spec.ts`)
+ - [ ] T139 [P] Integration test export Markdown triggers download & content snapshot (FR-045b) (`tests/integration/export-markdown.spec.ts`)
 
 ### Unit / Component Tests (Early Core Logic Without Implementation)
 - [X] T021 [P] Unit test graph ID + node/edge uniqueness utilities (`tests/unit/graph-ids.test.ts`)
@@ -75,6 +80,10 @@
  - [ ] T123 [P] Unit test deterministic parent selection tie-break (earliest created) (FR-043b) (`tests/unit/reparent-parent-select.test.ts`)
  - [ ] T124 [P] Unit test atomic rollback on simulated failure (inject error before commit) (FR-043) (`tests/unit/reparent-atomic-rollback.test.ts`)
  - [ ] T125 [P] Unit test duplicate edge skip logic (FR-043b) (`tests/unit/reparent-duplicate-skip.test.ts`)
+ - [ ] T140 [P] Unit test markdown serializer deterministic ordering + escaping (FR-045b) (`tests/unit/markdown-serializer.test.ts`)
+ - [ ] T141 [P] Unit test export bounding box computation (FR-045a) (`tests/unit/export-bbox.test.ts`)
+ - [ ] T142 [P] Unit test PNG export draws all nodes & edges count parity (mock canvas) (FR-045a) (`tests/unit/export-png-render.test.ts`)
+ - [ ] T143 [P] Unit test exports do not emit graph mutation events (FR-045/immutability) (`tests/unit/export-no-events.test.ts`)
 
 ## Phase 3.3: Core Implementation (ONLY after above tests are added & failing)
 - [X] T025 Implement persistence layer IndexedDB adapter `src/lib/indexeddb.ts` (init stores, CRUD, batch writes)
@@ -119,6 +128,18 @@
  - [ ] T128 Implement ordered event emission (node:deleted then edge:created) & update types (FR-043c)
  - [ ] T129 Integrate hierarchy cache invalidation & mutation counter increment on deletion (FR-043)
  - [ ] T130 (Backlog) Wrap deletion as single undo/redo compound action (FR-043) – optional post-MVP
+ - [ ] T144 Implement Map Actions UI section in Details pane (FR-044)
+ - [ ] T145 Wire Delete Map button to removeGraph + view transition (FR-044)
+ - [ ] T146 Implement markdown export utility (FR-045b)
+ - [ ] T147 Implement PNG export utility (FR-045a)
+ - [ ] T148 Implement export download trigger helper (anchor/objectURL abstraction) (FR-045a/045b)
+ - [ ] T149 Integrate export actions into Map Actions UI (FR-045)
+ - [ ] T150 Add export performance timing (optional) (FR-045a performance note)
+ - [ ] T126 Implement deletion domain logic (parent/children resolution, edge diff, validation) (FR-043..FR-043c)
+ - [ ] T127 Implement trash-can UI control (selected node overlay, disabled for root) (FR-043a)
+ - [ ] T128 Implement ordered event emission (node:deleted then edge:created) & update types (FR-043c)
+ - [ ] T129 Integrate hierarchy cache invalidation & mutation counter increment on deletion (FR-043)
+ - [ ] T130 (Backlog) Wrap deletion as single undo/redo compound action (FR-043) – optional post-MVP
 
 ## Phase 3.4: Integration
 - [ ] T042 Integrate autosave + event bus into GraphCanvas lifecycle
@@ -152,6 +173,13 @@
  - [ ] T132 Update quickstart/docs for node deletion & re-parent semantics (FR-043..FR-043b)
  - [ ] T133 Add manual validation checklist entries for deletion scenarios & performance target (FR-043)
  - [ ] T134 Add performance metric (mark/measure) around deletion operation (FR-043 performance)
+ - [ ] T151 Update quickstart/docs for Map Actions section & delete map from Details pane (FR-044)
+ - [ ] T152 Update quickstart/docs for Export PNG & Markdown usage (FR-045a, FR-045b)
+ - [ ] T153 Add manual validation checklist entries for exports (PNG visual, Markdown structure) (FR-045)
+ - [ ] T131 Update events contract doc for deletion ordering & root prohibition (FR-043c, FR-043a)
+ - [ ] T132 Update quickstart/docs for node deletion & re-parent semantics (FR-043..FR-043b)
+ - [ ] T133 Add manual validation checklist entries for deletion scenarios & performance target (FR-043)
+ - [ ] T134 Add performance metric (mark/measure) around deletion operation (FR-043 performance)
 
 ## Dependencies
 - Setup (T001-T008) before tests.
@@ -175,6 +203,8 @@
  - Hierarchy implementation ordering: T111 (compute + cache) → T113 (root detection integrated) → T112 (Details pane display). Docs/polish (T114-T115) after tests pass.
  - Deletion tests (T116-T125) MUST precede deletion implementation tasks (T126-T129).
  - Deletion implementation ordering: T126 (domain logic) → T127 (UI control) → T128 (ordered events) → T129 (cache invalidation ensure) → (optional) T130 (undo compound). Docs/polish (T131-T133) + performance metric (T134) after stable implementation & passing tests.
+ - Export tests (T135-T143) MUST precede export implementation tasks (T144-T149).
+ - Export implementation ordering: T144 (Map Actions UI skeleton) → T145 (Delete Map wiring) → T146 (markdown utility) → T147 (PNG utility) → T148 (download helper) → T149 (UI integration). Docs/polish (T151-T153) after tests pass. Performance metric (T150 optional) can follow utilities.
 
 ## Parallel Execution Examples
 ```

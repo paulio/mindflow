@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useGraph } from '../../state/graph-store';
+import { exportGraphAsMarkdown, exportGraphAsPng, triggerDownload } from '../../lib/export';
 import { useTheme } from '../../state/theme-store';
 
 export const GraphMetaPanel: React.FC = () => {
-  const { graph, nodes, edges, renameGraph, selectedNodeId, selectNode, levels } = useGraph();
+  const { graph, nodes, edges, renameGraph, selectedNodeId, selectNode, levels, removeGraph } = useGraph() as any;
   const { theme, setTheme, available } = useTheme();
   const [name, setName] = useState(graph?.name ?? '');
   if (!graph) return null;
@@ -41,6 +42,38 @@ export const GraphMetaPanel: React.FC = () => {
             </label>
           ))}
         </fieldset>
+      </section>
+      <hr style={{ border: 'none', borderTop: '1px solid #222', margin: '8px 0' }} />
+      <section aria-labelledby="map-actions-heading">
+        <h4 id="map-actions-heading" style={{ margin: '4px 0 6px', fontSize: 13 }}>Map Actions</h4>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <button
+            type="button"
+            onClick={async () => {
+              if (!graph) return;
+              const ok = window.confirm(`Delete map "${graph.name}"? This cannot be undone.`);
+              if (!ok) return;
+              await removeGraph(graph.id);
+            }}
+            style={{ background: '#2a2a30', color:'#fff', padding:'4px 8px', border:'1px solid #444', cursor:'pointer', textAlign:'left' }}
+          >Delete Map</button>
+          <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+            <span style={{ fontSize: 12, opacity:0.7 }}>Export</span>
+            <div style={{ display:'flex', gap:6 }}>
+              <button type="button" style={{ background:'#222', color:'#fff', padding:'4px 8px', border:'1px solid #444', cursor:'pointer' }} onClick={async () => {
+                if (!graph) return;
+                const blob = await exportGraphAsPng(graph, nodes, edges);
+                if (blob) triggerDownload(`${graph.name || 'graph'}.png`, blob);
+              }}>PNG</button>
+              <button type="button" style={{ background:'#222', color:'#fff', padding:'4px 8px', border:'1px solid #444', cursor:'pointer' }} onClick={() => {
+                if (!graph) return;
+                const md = exportGraphAsMarkdown(graph, nodes, edges);
+                const blob = new Blob([md], { type: 'text/markdown' });
+                triggerDownload(`${graph.name || 'graph'}.md`, blob as any);
+              }}>Markdown</button>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   );

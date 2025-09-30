@@ -84,6 +84,9 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 20. **Given** a non-Root node is selected, **Then** a trash‑can delete control appears adjacent to (but not overlapping) the node; **When** I activate (click/tap/press Enter on) the control and confirm (if a confirmation affordance is required), **Then** the node is deleted and each of its direct children (former level N+1) is re‑parented to the deleted node’s parent (now connected directly to level N‑1) without losing their own subtrees.
 21. **Given** the Root node is selected, **Then** the trash‑can delete control is shown in a visibly disabled state (ARIA disabled, no pointer activation) and any attempt to activate it is ignored (no deletion occurs).
 22. **Given** I delete a node that has multiple children, **Then** all children become siblings under the deleted node’s parent and no duplicate edges are created (existing edges that would become duplicates are not re-added).
+23. **Given** I am viewing the Details pane while a map is open on the Editing Canvas, **Then** I see a clearly labeled "Map Actions" (or equivalent) section that includes a "Delete Map" action distinct from per‑node controls.
+24. **Given** I activate the "Delete Map" action in the Details pane and confirm, **Then** the current map is removed from persistence, the Editing Canvas closes, and I am returned to the Map Library list with that map no longer present (unless a persistence error occurs, in which case an error message is surfaced and the map remains).
+25. **Given** a map is open and the Details pane is visible, **When** I choose "Export Map" → "Export as PNG", **Then** a PNG file download begins containing a rasterized image of the entire current graph (all nodes & edges) using the currently applied theme (visual fidelity). **And** when I choose "Export as Markdown", **Then** a `.md` file download begins containing a hierarchical bullet list representation of the graph rooted at the Root node (level indentation reflects computed levels) including each node’s text exactly once.
 
 ### Edge Cases
 - Creating many nodes rapidly (drag spamming) should not produce orphan edges or duplicate node IDs.
@@ -107,6 +110,10 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
  - Visual affordance: Delete control should not obscure node text or directional handles and should remain within a predictable offset (implementation-defined) so users can reliably target it.
  - Accessibility: Disabled Root delete control MUST expose appropriate disabled semantics (e.g., aria-disabled="true").
  - Large fan-out delete: Re-parenting of a node with many children (e.g., >50) should still operate within acceptable performance (target <100ms) and not degrade autosave behavior.
+ - Delete Map (Details pane) should confirm before destruction and must return user to Library view on success.
+ - Export PNG should not alter or persist any additional state (read-only render pass) and should include all nodes even if partially off current viewport (graph fit logic applied for export only).
+ - Export Markdown must escape Markdown control characters in node text (assumption) to avoid unintended formatting beyond bullet structure.
+ - Export actions must not emit structural graph events (no node/edge created/updated/deleted) – optional dedicated export:* events deferred.
 
 ## Requirements *(mandatory)*
 
@@ -162,6 +169,10 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - **FR-043a**: Root node deletion MUST be disallowed. The UI MUST display a disabled trash‑can control when Root is selected to communicate the action is not permitted.
 - **FR-043b**: Re-parenting during deletion MUST avoid creating duplicate edges (same source + target). If an edge would duplicate one already existing, it is skipped. Operation MUST be atomic: if any new required edge cannot be created, the deletion aborts and original structure remains.
 - **FR-043c**: Re-parent delete operation MUST emit node:deleted events for the removed node followed by edge:created events (only for newly added edges) in a deterministic order (stable sort by child node id ascending) to support predictable undo/redo ordering.
+- **FR-044**: System MUST provide a "Map Actions" section within the Details pane (visible on the Editing Canvas) containing a Delete Map control that, upon confirmed activation, deletes the currently open map and returns the user to the Map Library view (cannot leave user on an empty canvas).
+- **FR-045**: System MUST provide an Export Map control within the Details pane offering at least two sub-options: Export as PNG and Export as Markdown.
+- **FR-045a**: Export as PNG MUST generate a downloadable PNG image representing the full current graph (all nodes & edges) using the active theme styling; export MUST NOT mutate graph data or change viewport.
+- **FR-045b**: Export as Markdown MUST generate a `.md` file containing a hierarchical bullet list: Root as top-level line, each subsequent level indented by two spaces per level (implementation-defined but consistent). Each node appears exactly once; multi-line node text MAY be flattened (newlines replaced with spaces) for bullet output. Special Markdown characters in node text (e.g., `* _ #`) SHOULD be escaped to preserve literal text.
 
 Assumptions incorporated from clarifications; remaining open items limited to performance metric formalization and future shortcut design.
 
