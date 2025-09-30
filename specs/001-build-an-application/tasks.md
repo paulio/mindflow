@@ -60,6 +60,7 @@
  - [ ] T137 [P] Integration test delete map via Details pane returns to library (FR-044) (`tests/integration/delete-map-details-pane.spec.ts`)
  - [ ] T138 [P] Integration test export PNG triggers download (blob URL intercepted) (FR-045a) (`tests/integration/export-png.spec.ts`)
  - [ ] T139 [P] Integration test export Markdown triggers download & content snapshot (FR-045b) (`tests/integration/export-markdown.spec.ts`)
+ - [ ] T166 [P] Integration test re-parent edges assign nearest directional handles (FR-043d) (`tests/integration/reparent-handle-assignment.spec.ts`)
  - [ ] T155 [P] Integration test clone map creates deep copy & switches context (FR-046b) (`tests/integration/clone-map-switch.spec.ts`)
  - [ ] T156 [P] Integration test clone large map performance (<500ms 500 nodes) (FR-046 performance) (`tests/integration/clone-perf.spec.ts`)
 
@@ -90,6 +91,7 @@
  - [ ] T157 [P] Unit test clone name generator increments correctly skipping existing numbers (FR-046a) (`tests/unit/clone-name-generator.test.ts`)
  - [ ] T158 [P] Unit test clone deep copy (IDs differ, text/positions equal) (FR-046) (`tests/unit/clone-deep-copy.test.ts`)
  - [ ] T159 [P] Unit test clone does not mutate source graph (FR-046) (`tests/unit/clone-source-immutability.test.ts`)
+ - [ ] T165 [P] Unit test re-parent handle selection algorithm (dx/dy quadrants + tie) (FR-043d) (`tests/unit/reparent-handle-selection.test.ts`)
 
 ## Phase 3.3: Core Implementation (ONLY after above tests are added & failing)
 - [X] T025 Implement persistence layer IndexedDB adapter `src/lib/indexeddb.ts` (init stores, CRUD, batch writes)
@@ -144,6 +146,7 @@
  - [ ] T160 Implement clone utility & persistence (FR-046)
  - [ ] T161 Wire Clone action into Map Actions UI (FR-046b)
  - [ ] T162 Add clone performance timing metric (optional) (FR-046 performance)
+ - [ ] T167 Implement re-parent edge handle assignment logic (nearest cardinal selection) (FR-043d)
  - [ ] T126 Implement deletion domain logic (parent/children resolution, edge diff, validation) (FR-043..FR-043c)
  - [ ] T127 Implement trash-can UI control (selected node overlay, disabled for root) (FR-043a)
  - [ ] T128 Implement ordered event emission (node:deleted then edge:created) & update types (FR-043c)
@@ -187,6 +190,7 @@
  - [ ] T153 Add manual validation checklist entries for exports (PNG visual, Markdown structure) (FR-045)
  - [ ] T163 Update quickstart/docs for Clone Map action (FR-046..FR-046b)
  - [ ] T164 Add manual validation checklist entries for clone scenarios & performance target (FR-046)
+ - [ ] T168 Update quickstart/docs to note re-parent handle direction logic (FR-043d)
  - [ ] T131 Update events contract doc for deletion ordering & root prohibition (FR-043c, FR-043a)
  - [ ] T132 Update quickstart/docs for node deletion & re-parent semantics (FR-043..FR-043b)
  - [ ] T133 Add manual validation checklist entries for deletion scenarios & performance target (FR-043)
@@ -218,6 +222,7 @@
  - Export implementation ordering: T144 (Map Actions UI skeleton) → T145 (Delete Map wiring) → T146 (markdown utility) → T147 (PNG utility) → T148 (download helper) → T149 (UI integration). Docs/polish (T151-T153) after tests pass. Performance metric (T150 optional) can follow utilities.
  - Clone tests (T154-T159) MUST precede clone implementation tasks (T160-T161).
  - Clone implementation ordering: T160 (utility) → T161 (UI wiring) → optional performance metric T162. Docs/polish (T163-T164) after implementation passes tests.
+ - Re-parent handle tests (T165, T166) MUST precede implementation task (T167). Docs update (T168) after successful tests & implementation.
 
 ## Parallel Execution Examples
 ```

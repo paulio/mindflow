@@ -300,7 +300,25 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (childId === parentId) continue; // safety
       if (hasEdge(parentId, childId)) continue; // duplicate prevention (FR-043b)
       try {
-        const e = createEdge({ graphId: graph.id, sourceNodeId: parentId, targetNodeId: childId });
+        // FR-043d handle assignment based on nearest cardinal direction
+        const parentNode = nodes.find(n => n.id === parentId);
+        const childNode = nodes.find(n => n.id === childId);
+        let sourceHandleId: string | undefined; let targetHandleId: string | undefined;
+        if (parentNode && childNode) {
+          const APPROX_W = 100; const APPROX_H = 38; // heuristic sizing consistent with creation constants
+            const px = parentNode.x + APPROX_W / 2; const py = parentNode.y + APPROX_H / 2;
+            const cx = childNode.x + APPROX_W / 2; const cy = childNode.y + APPROX_H / 2;
+            const dx = cx - px; const dy = cy - py;
+            const adx = Math.abs(dx); const ady = Math.abs(dy);
+            if (ady >= adx) { // vertical dominance or tie => vertical
+              if (dy < 0) { sourceHandleId = 'n'; targetHandleId = 's'; }
+              else { sourceHandleId = 's'; targetHandleId = 'n'; }
+            } else {
+              if (dx > 0) { sourceHandleId = 'e'; targetHandleId = 'w'; }
+              else { sourceHandleId = 'w'; targetHandleId = 'e'; }
+            }
+        }
+        const e = createEdge({ graphId: graph.id, sourceNodeId: parentId, targetNodeId: childId, sourceHandleId, targetHandleId });
         newEdges.push(e);
       } catch { /* ignore */ }
     }
