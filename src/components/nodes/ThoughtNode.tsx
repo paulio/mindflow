@@ -74,7 +74,7 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
         if (!editing) startEditing(id);
       }}
       style={{
-        padding: 4,
+  padding: 4,
         background: selected ? 'var(--mf-node-bg-selected)' : 'var(--mf-node-bg)',
         border: `${selected ? 'var(--mf-node-border-width-selected)' : 'var(--mf-node-border-width)'} solid ${selected ? 'var(--mf-node-border-selected)' : 'var(--mf-node-border)'}`,
         boxShadow: selected ? 'var(--mf-selection-outline)' : 'none',
@@ -91,7 +91,7 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
         color: 'var(--mf-node-text)',
         position: 'relative', // needed so floating delete button positions correctly
         overflow: 'visible',
-        paddingTop: selected && !editing ? 16 : 4 // create headroom for in-bounds delete button when visible
+  // Delete button will float fully outside; no need to adjust paddingTop
       }}
     >
       {editing ? (
@@ -116,9 +116,9 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
           onClick={(e) => { e.stopPropagation(); if (!isRoot) deleteNode(id); }}
           style={{
             position: 'absolute',
-            top: 0,
-            left: '50%',
-            transform: 'translate(-50%, -50%)', // overlap the border slightly but remain within wrapper bounds
+            top: -28, // float above node, outside content flow
+            left: 'calc(75% - 11px)', // center of button at 75% width
+            transform: 'none',
             width: 22,
             height: 22,
             borderRadius: '50%',
