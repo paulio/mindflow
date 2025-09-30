@@ -1,3 +1,14 @@
+/**
+ * Internal representation of an undoable change entry.
+ * Each entry captures two pure(ish) directional operations:
+ *  - undo(): transitions state to the previous observable form
+ *  - redo(): reapplies the forward change exactly once relative to that previous form
+ * The logical public model = two stacks: Undo (applied) & Redo (revertable forwards).
+ * Implementation optimization: single array + pointer index.
+ *   stack[0..pointer]   => applied entries (canUndo if pointer >=0)
+ *   stack[pointer+1..]  => redoable entries (canRedo if pointer < stack.length-1)
+ * Pushing when pointer < last prunes the redo tail (branch invalidation per FR-034).
+ */
 interface Entry<T = any> { undo: () => void; redo: () => void; type: string; data?: T; }
 
 export class UndoStack {
@@ -36,4 +47,14 @@ export class UndoStack {
   }
   size() { return this.stack.length; }
   clear() { this.stack = []; this.pointer = -1; }
+
+  /**
+   * Development/test helper: peek next undo & redo entry types without mutating state.
+   * Not part of public stable API (can change). Used for richer event metadata emission.
+   */
+  __peekTypes(): { undoType: string | null; redoType: string | null } {
+    const undoType = this.pointer >= 0 ? this.stack[this.pointer].type : null;
+    const redoType = this.pointer < this.stack.length - 1 ? this.stack[this.pointer + 1].type : null;
+    return { undoType, redoType };
+  }
 }
