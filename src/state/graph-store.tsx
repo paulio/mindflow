@@ -18,6 +18,9 @@ interface GraphContext extends GraphState {
   addEdge(source: string, target: string, sourceHandleId?: string, targetHandleId?: string): void;
   addConnectedNode(sourceNodeId: string, x: number, y: number, sourceHandleId?: string, targetHandleId?: string): NodeRecord | null; // atomic node+edge with directional handle metadata
   updateNodeText(nodeId: string, text: string): void;
+  updateNodeColors(nodeId: string, bgColor?: string, textColor?: string): void;
+  updateNodeZOrder(nodeId: string, front: boolean): void;
+  updateNoteAlignment(nodeId: string, h?: 'left' | 'center' | 'right', v?: 'top' | 'middle' | 'bottom'): void;
   moveNode(nodeId: string, x: number, y: number): void;
   updateViewport(x: number, y: number, zoom: number): void;
   // Ephemeral position update during drag (no persistence, no lastModified update)
@@ -32,6 +35,13 @@ interface GraphContext extends GraphState {
   selectedNodeId: string | null;
   selectNode(id: string | null): void;
   levels: Map<string, number>;
+  // Toolbar feature state
+  activeTool: 'note' | 'rect' | null;
+  activateTool(tool: 'note' | 'rect'): void;
+  toggleTool(tool: 'note' | 'rect'): void;
+  addAnnotation(kind: 'note' | 'rect', x: number, y: number): void;
+  resizeRectangle(nodeId: string, width: number, height: number, gesture?: { prevWidth: number; prevHeight: number; prevX: number; prevY: number; newX?: number; newY?: number }): void;
+  resizeRectangleEphemeral(nodeId: string, width: number, height: number, x: number, y: number): void;
 }
 
 const Ctx = createContext<GraphContext | null>(null);
@@ -46,6 +56,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [pendingChanges, setPendingChanges] = useState<boolean>(false); // placeholder (would toggle on edits & clear on autosave success)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [levels, setLevels] = useState<Map<string, number>>(new Map());
+  const [activeTool, setActiveTool] = useState<'note' | 'rect' | null>(null);
   const mutationCounter = useRef(0);
 
   async function refreshList() { setGraphs(await listGraphs()); }
@@ -235,6 +246,64 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       redo: () => setNodeTextRaw(nodeId, newText)
     });
   }, [graph, nodes, setNodeTextRaw]);
+
+  const updateNodeColors = useCallback((nodeId: string, bgColor?: string, textColor?: string) => {
+    if (!graph) return;
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const prevBg = node.bgColor;
+    const prevText = node.textColor;
+    const nextBg = bgColor ?? prevBg;
+    const nextText = node.nodeKind === 'note' ? (textColor ?? prevText) : undefined; // rect ignores text color
+    // No-op check
+    if (prevBg === nextBg && prevText === nextText) return;
+    const ts = new Date().toISOString();
+    const updated: NodeRecord = { ...node, bgColor: nextBg, textColor: nextText, lastModified: ts } as NodeRecord;
+    setNodes(ns => ns.map(n => n.id === nodeId ? updated : n));
+    void saveNodes(graph.id, [updated]);
+    events.emit('node:colorChanged', { nodeId, bgColor: nextBg, textColor: nextText });
+    pushUndo({
+      type: 'update-node-color',
+      undo: () => {
+        const restore: NodeRecord = { ...updated, bgColor: prevBg, textColor: prevText } as NodeRecord;
+        setNodes(ns => ns.map(n => n.id === nodeId ? restore : n));
+        void saveNodes(graph.id!, [restore]);
+        events.emit('node:colorChanged', { nodeId, bgColor: prevBg, textColor: prevText });
+      },
+      redo: () => {
+        const redoNode: NodeRecord = { ...updated, bgColor: nextBg, textColor: nextText } as NodeRecord;
+        setNodes(ns => ns.map(n => n.id === nodeId ? redoNode : n));
+        void saveNodes(graph.id!, [redoNode]);
+        events.emit('node:colorChanged', { nodeId, bgColor: nextBg, textColor: nextText });
+      }
+    });
+  }, [graph, nodes]);
+
+  const updateNodeZOrder = useCallback((nodeId: string, front: boolean) => {
+    if (!graph) return;
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const prev = node.frontFlag !== false; // default true when undefined
+    const next = !!front;
+    if (prev === next) return; // no-op
+    setNodes(ns => ns.map(n => n.id === nodeId ? { ...n, frontFlag: next } : n));
+    const snapshot = { id: nodeId, prev, next };
+    void saveNodes(graph.id!, [{ ...node, frontFlag: next } as NodeRecord]);
+    events.emit('node:zOrderChanged', { nodeId, frontFlag: next });
+    pushUndo({
+      type: 'update-node-zorder',
+      undo: () => {
+        setNodes(ns => ns.map(n => n.id === nodeId ? { ...n, frontFlag: snapshot.prev } : n));
+        void saveNodes(graph.id!, [{ ...node, frontFlag: snapshot.prev } as NodeRecord]);
+        events.emit('node:zOrderChanged', { nodeId, frontFlag: snapshot.prev });
+      },
+      redo: () => {
+        setNodes(ns => ns.map(n => n.id === nodeId ? { ...n, frontFlag: snapshot.next } : n));
+        void saveNodes(graph.id!, [{ ...node, frontFlag: snapshot.next } as NodeRecord]);
+        events.emit('node:zOrderChanged', { nodeId, frontFlag: snapshot.next });
+      }
+    });
+  }, [graph, nodes]);
 
   const moveNode = useCallback((nodeId: string, x: number, y: number) => {
     if (!graph) return;
@@ -504,6 +573,146 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const stopEditing = useCallback(() => { setEditingNodeId(null); }, []);
   const selectNode = useCallback((id: string | null) => { setSelectedNodeId(id); }, []);
 
+  // Toolbar actions
+  const activateTool = useCallback((tool: 'note' | 'rect') => {
+    setActiveTool(prev => {
+      if (prev === tool) return prev; // handled by toggleTool
+      events.emit('toolbar:toolActivated', { tool });
+      return tool;
+    });
+  }, []);
+
+  // Annotation creation (Feature 003)
+  const addAnnotation = useCallback((kind: 'note' | 'rect', x: number, y: number) => {
+    if (!graph) return null;
+    const now = new Date().toISOString();
+    const rec: NodeRecord = {
+      id: crypto?.randomUUID ? crypto.randomUUID() : 'mf-' + Math.random().toString(16).slice(2),
+      graphId: graph.id,
+      text: '',
+      x: Math.round(x),
+      y: Math.round(y),
+      created: now,
+      lastModified: now,
+      nodeKind: kind,
+      frontFlag: true,
+      width: kind === 'rect' ? 120 : (kind === 'note' ? 140 : undefined),
+      height: kind === 'rect' ? 60 : (kind === 'note' ? 90 : undefined)
+    };
+    setNodes(ns => [...ns, rec]);
+    events.emit('node:created', { graphId: graph.id, nodeId: rec.id });
+    void saveNodes(graph.id, [rec]);
+    const snapshot = { ...rec };
+    pushUndo({
+      type: kind === 'note' ? 'create-note' : 'create-rect',
+      undo: () => {
+        setNodes(ns => ns.filter(n => n.id !== snapshot.id));
+        events.emit('node:deleted', { graphId: graph.id!, nodeId: snapshot.id });
+        void persistNodeDeletion(graph.id!, snapshot.id, [], []);
+      },
+      redo: () => {
+        setNodes(ns => ns.some(n => n.id === snapshot.id) ? ns : [...ns, snapshot]);
+        events.emit('node:created', { graphId: graph.id!, nodeId: snapshot.id });
+        void saveNodes(graph.id!, [snapshot]);
+      }
+    });
+    setSelectedNodeId(rec.id);
+    return rec;
+  }, [graph]);
+
+  // Rectangle resizing commit (FR-041..FR-045)
+  const resizeRectangle = useCallback((nodeId: string, width: number, height: number, gesture?: { prevWidth: number; prevHeight: number; prevX: number; prevY: number; newX?: number; newY?: number }) => {
+    if (!graph) return;
+    setNodes(ns => ns.map(n => {
+  if (n.id === nodeId && (n.nodeKind === 'rect' || n.nodeKind === 'note')) {
+        const w = Math.max(40, Math.round(width));
+        const h = Math.max(40, Math.round(height));
+        const nextX = gesture?.newX !== undefined ? Math.round(gesture.newX) : n.x;
+        const nextY = gesture?.newY !== undefined ? Math.round(gesture.newY) : n.y;
+        if (n.width === w && n.height === h && n.x === nextX && n.y === nextY) return n; // no-op
+        const updated: NodeRecord = { ...n, width: w, height: h, x: nextX, y: nextY, lastModified: new Date().toISOString() };
+        void saveNodes(graph.id!, [updated]);
+        events.emit('node:resized', { nodeId, width: w, height: h, prevWidth: n.width ?? 120, prevHeight: n.height ?? 60 });
+        const prevW = gesture?.prevWidth ?? (n.width ?? 120);
+        const prevH = gesture?.prevHeight ?? (n.height ?? 60);
+        const prevX = gesture?.prevX ?? n.x;
+        const prevY = gesture?.prevY ?? n.y;
+        if (!gesture || (prevW === w && prevH === h && prevX === nextX && prevY === nextY)) {
+          return updated; // not a gesture commit OR no net change
+        }
+        pushUndo({
+          type: 'resize-rect',
+          undo: () => {
+            setNodes(cur => cur.map(cn => cn.id === nodeId ? { ...cn, width: prevW, height: prevH, x: prevX, y: prevY } : cn));
+            void saveNodes(graph.id!, [{ ...updated, width: prevW, height: prevH, x: prevX, y: prevY } as NodeRecord]);
+            events.emit('node:resized', { nodeId, width: prevW, height: prevH, prevWidth: w, prevHeight: h });
+          },
+          redo: () => {
+            setNodes(cur => cur.map(cn => cn.id === nodeId ? { ...cn, width: w, height: h, x: nextX, y: nextY } : cn));
+            void saveNodes(graph.id!, [{ ...updated, width: w, height: h, x: nextX, y: nextY } as NodeRecord]);
+            events.emit('node:resized', { nodeId, width: w, height: h, prevWidth: prevW, prevHeight: prevH });
+          }
+        });
+        return updated;
+      }
+      return n;
+    }));
+  }, [graph]);
+
+  // Ephemeral live rectangle resize (no persistence, no undo push) used during drag before mouseup
+  const resizeRectangleEphemeral = useCallback((nodeId: string, width: number, height: number, x: number, y: number) => {
+    if (!graph) return;
+    setNodes(ns => ns.map(n => {
+  if (n.id === nodeId && (n.nodeKind === 'rect' || n.nodeKind === 'note')) {
+        const w = Math.max(40, Math.round(width));
+        const h = Math.max(40, Math.round(height));
+        // Do not mutate lastModified here; this is transient visual feedback
+        if (n.width === w && n.height === h && n.x === Math.round(x) && n.y === Math.round(y)) return n;
+        return { ...n, width: w, height: h, x: Math.round(x), y: Math.round(y) } as NodeRecord;
+      }
+      return n;
+    }));
+  }, [graph]);
+
+  // Update note alignment (horizontal / vertical) with undo (notes only)
+  const updateNoteAlignment = useCallback((nodeId: string, h?: 'left'|'center'|'right', v?: 'top'|'middle'|'bottom') => {
+    if (!graph) return;
+    setNodes(ns => ns.map(n => {
+      if (n.id === nodeId && n.nodeKind === 'note') {
+        const prevH = n.textAlign || 'center';
+        const prevV = n.textVAlign || 'middle';
+        const nextH = h ?? prevH;
+        const nextV = v ?? prevV;
+        if (prevH === nextH && prevV === nextV) return n;
+        const updated: NodeRecord = { ...n, textAlign: nextH, textVAlign: nextV, lastModified: new Date().toISOString() };
+        void saveNodes(graph.id!, [updated]);
+        pushUndo({
+          type: 'update-note-align',
+          undo: () => {
+            setNodes(cur => cur.map(cn => cn.id === nodeId ? { ...cn, textAlign: prevH, textVAlign: prevV } : cn));
+            void saveNodes(graph.id!, [{ ...updated, textAlign: prevH, textVAlign: prevV } as NodeRecord]);
+          },
+          redo: () => {
+            setNodes(cur => cur.map(cn => cn.id === nodeId ? { ...cn, textAlign: nextH, textVAlign: nextV } : cn));
+            void saveNodes(graph.id!, [{ ...updated, textAlign: nextH, textVAlign: nextV } as NodeRecord]);
+          }
+        });
+        return updated;
+      }
+      return n;
+    }));
+  }, [graph]);
+  const toggleTool = useCallback((tool: 'note' | 'rect') => {
+    setActiveTool(prev => {
+      if (prev === tool) {
+        events.emit('toolbar:toolDeactivated', { tool });
+        return null;
+      }
+      events.emit('toolbar:toolActivated', { tool });
+      return tool;
+    });
+  }, []);
+
   // Hierarchy computation (BFS) when structure changes
   useEffect(() => {
     let cancelled = false;
@@ -523,7 +732,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

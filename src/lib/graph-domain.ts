@@ -1,5 +1,7 @@
 import { generateId } from './indexeddb';
 import { EdgeRecord, NodeRecord } from './types';
+import { events } from './events';
+import { pushUndo } from '../hooks/useUndoRedo';
 
 export interface CreateNodeInput { graphId: string; text?: string; x: number; y: number; }
 export function createNode(input: CreateNodeInput): NodeRecord {
@@ -13,6 +15,42 @@ export function createNode(input: CreateNodeInput): NodeRecord {
     created: now,
     lastModified: now
   };
+}
+
+// Annotation (toolbar) node creators
+export interface CreateAnnotationInput { graphId: string; kind: 'note' | 'rect'; x: number; y: number; }
+export function createAnnotationNode(input: CreateAnnotationInput): NodeRecord {
+  const now = new Date().toISOString();
+  return {
+    id: generateId(),
+    graphId: input.graphId,
+    text: input.kind === 'note' ? '' : '',
+    x: Math.round(input.x),
+    y: Math.round(input.y),
+    created: now,
+    lastModified: now,
+    nodeKind: input.kind,
+    bgColor: undefined,
+    textColor: undefined,
+    frontFlag: true
+  };
+}
+
+// Push undo for an annotation node creation (no edges)
+export function commitAnnotationCreation(graphId: string, record: NodeRecord, setNodes: React.Dispatch<React.SetStateAction<NodeRecord[]>>) {
+  setNodes(ns => [...ns, record]);
+  events.emit('node:created', { graphId, nodeId: record.id });
+  pushUndo({
+    type: record.nodeKind === 'note' ? 'create-note' : 'create-rect',
+    undo: () => {
+      setNodes(ns => ns.filter(n => n.id !== record.id));
+      events.emit('node:deleted', { graphId, nodeId: record.id });
+    },
+    redo: () => {
+      setNodes(ns => ns.some(n => n.id === record.id) ? ns : [...ns, record]);
+      events.emit('node:created', { graphId, nodeId: record.id });
+    }
+  });
 }
 
 export interface CreateEdgeInput { graphId: string; sourceNodeId: string; targetNodeId: string; sourceHandleId?: string; targetHandleId?: string; }

@@ -2,8 +2,13 @@ import React, { useMemo, useRef, useState, useEffect } from 'react';
 import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, OnEdgesChange, Connection, Handle, Position, OnConnectStart, OnConnectEnd, useReactFlow, applyNodeChanges } from 'reactflow';
 import { ThoughtEdge } from './ThoughtEdge';
 import { useGraph } from '../../state/graph-store';
+import { isPlacementValid } from '../../lib/distance';
+import { NOTE_W, NOTE_H, RECT_W, RECT_H, THOUGHT_W, THOUGHT_H } from '../../lib/annotation-constants';
+import { commitAnnotationCreation, createAnnotationNode } from '../../lib/graph-domain';
 import 'reactflow/dist/style.css';
 import { ThoughtNode } from '../nodes/ThoughtNode';
+import { RectNode } from '../nodes/RectNode';
+import { NoteNode } from '../nodes/NoteNode';
 // Custom directional ghost/drag handles removed in favor of native React Flow connection UX.
 
 const handleStyle: React.CSSProperties = {
@@ -34,7 +39,7 @@ const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
 };
 
 export const GraphCanvas: React.FC = () => {
-  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addConnectedNode, graph, updateViewport, selectNode, selectedNodeId } = useGraph();
+  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addConnectedNode, graph, updateViewport, selectNode, activeTool, addAnnotation } = useGraph();
   // Local React Flow controlled nodes (decoupled from store during drag for stability)
   const [flowNodes, setFlowNodes] = useState<any[]>([]);
   // Initialize / merge store nodes into local state (add new, update labels). Positions updated when not currently dragging.
@@ -42,12 +47,35 @@ export const GraphCanvas: React.FC = () => {
     setFlowNodes(cur => {
       const byId = new Map(cur.map(n => [n.id, n]));
       return nodes.map((n: any) => {
-        const existing = byId.get(n.id);
-        if (existing) {
-          // Always sync committed position from store so undo/redo updates are reflected.
-          return { ...existing, position: { x: n.x, y: n.y }, data: { label: n.text || 'New Thought' } };
+        // z layering:
+        // -1 => annotation behind (should sit below edges & thought nodes)
+        // 10 => thought baseline
+        // 15 => annotation front (above thoughts)
+        const isAnnotation = n.nodeKind === 'note' || n.nodeKind === 'rect';
+        const front = n.frontFlag !== false; // default true
+        const zIndex = isAnnotation ? (front ? 15 : -1) : 10;
+        const baseType = n.nodeKind && n.nodeKind !== 'thought' ? n.nodeKind : 'thought';
+        const sizeStyle = (n.nodeKind === 'rect')
+          ? { width: n.width || RECT_W, height: n.height || RECT_H }
+          : (n.nodeKind === 'note' ? { width: n.width || NOTE_W, height: n.height || NOTE_H } : {});
+        if (byId.has(n.id)) {
+          const existing = byId.get(n.id)!;
+            return {
+            ...existing,
+            position: { x: n.x, y: n.y },
+            style: { ...(existing.style || {}), ...sizeStyle, zIndex },
+            data: { label: n.text || 'New Thought', raw: n },
+            type: baseType
+          };
         }
-        return { id: n.id, type: 'thought', position: { x: n.x, y: n.y }, data: { label: n.text || 'New Thought' }, tabIndex: 0 };
+        return {
+          id: n.id,
+          type: baseType,
+          position: { x: n.x, y: n.y },
+          style: { ...sizeStyle, zIndex },
+          data: { label: n.text || (baseType === 'note' ? 'Note' : 'New Thought'), raw: n },
+          tabIndex: 0
+        };
       });
     });
   }, [nodes]);
@@ -141,7 +169,15 @@ export const GraphCanvas: React.FC = () => {
     // eslint-disable-next-line no-console
     console.debug('[GraphCanvas] edges updated', edges.map((e: { id: string; sourceNodeId: string; targetNodeId: string }) => ({ id: e.id, s: e.sourceNodeId, t: e.targetNodeId })));
   }, [edges]);
-  const nodeTypes = useMemo(() => ({ thought: ThoughtNodeWrapper }), []);
+  const RectWrapper: React.FC<NodeProps> = (props) => {
+    const { id, selected } = props as any;
+    return <RectNode id={id} selected={!!selected} />;
+  };
+  const NoteWrapper: React.FC<NodeProps> = (props) => {
+    const { id, data, selected } = props as any;
+    return <NoteNode id={id} text={data.label} selected={!!selected} />;
+  };
+  const nodeTypes = useMemo(() => ({ thought: ThoughtNodeWrapper, note: NoteWrapper, rect: RectWrapper }), []);
   const edgeTypes = useMemo(() => ({ 'thought-edge': ThoughtEdge }), []);
   return (
     <div style={{ flex: 1 }}>
@@ -155,12 +191,12 @@ export const GraphCanvas: React.FC = () => {
   onEdgesChange={onEdgesChange}
   onNodeDragStop={onNodeDragStop}
         zoomOnDoubleClick={false}
-        onNodeClick={(_, node) => { selectNode(node.id); }}
+  onNodeClick={(_, node) => { selectNode(node.id); }}
         onNodeDoubleClick={(e: React.MouseEvent, node: Node) => {
           e.preventDefault();
           e.stopPropagation();
           selectNode(node.id);
-          if (editingNodeId !== node.id) startEditing(node.id);
+          if (editingNodeId !== node.id && (node.type === 'thought' || node.type === 'note')) startEditing(node.id);
         }}
   onConnect={onConnect}
   onConnectStart={onConnectStart}
@@ -170,9 +206,26 @@ export const GraphCanvas: React.FC = () => {
         elementsSelectable
         connectOnClick={false}
         onPaneClick={(e) => {
-          // Example future enhancement: add node where user clicks.
-          // const bounds = (e.target as HTMLElement).getBoundingClientRect();
-          // addNode(e.clientX - bounds.left, e.clientY - bounds.top);
+          if (!graph) return;
+          if (!activeTool) return; // FR-024
+          const point = rfInstance.screenToFlowPosition({ x: (e as any).clientX, y: (e as any).clientY });
+          const w = activeTool === 'note' ? NOTE_W : RECT_W;
+          const h = activeTool === 'note' ? NOTE_H : RECT_H;
+          const candidate = { x: point.x - w / 2, y: point.y - h / 2, w, h };
+          // Build existing boxes - approximate thought size; annotation sizes unknown yet so treat existing annotation nodes similarly for now.
+          const existing = nodes.map(n => ({
+            x: n.x,
+            y: n.y,
+            w: n.nodeKind === 'rect' ? (n.width || RECT_W) : (n.nodeKind === 'note' ? NOTE_W : THOUGHT_W),
+            h: n.nodeKind === 'rect' ? (n.height || RECT_H) : (n.nodeKind === 'note' ? NOTE_H : THOUGHT_H)
+          }));
+          if (!isPlacementValid(candidate as any, existing as any)) {
+            return; // FR-023 rejection
+          }
+          const created = addAnnotation(activeTool, candidate.x, candidate.y) as any;
+          if (activeTool === 'note' && created) {
+            requestAnimationFrame(() => startEditing(created.id));
+          }
         }}
         defaultEdgeOptions={{ type: 'thought-edge', style: { pointerEvents: 'none' } }}
   style={{ background: '#0d0f17' }}
