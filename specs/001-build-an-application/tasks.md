@@ -196,6 +196,50 @@
  - [ ] T133 Add manual validation checklist entries for deletion scenarios & performance target (FR-043)
  - [ ] T134 Add performance metric (mark/measure) around deletion operation (FR-043 performance)
 
+### Undo / Redo (Spec 002) – Tests First Then Implementation
+#### Contract & Unit Tests (Must fail first)
+ - [ ] T169 [P] Contract test undo history exclusion (export & clone produce no entries) (`tests/contract/undo-exclusion.test.ts`) (FR-004, FR-027, FR-028)
+ - [X] T170 [P] Unit test history depth rollover (push 101 entries -> oldest dropped, size=100) (`tests/unit/undo-depth-rollover.test.ts`) (FR-026)
+ - [X] T171 [P] Unit test single drag yields one entry (simulate drag lifecycle) (`tests/unit/undo-move-single-entry.test.ts`) (FR-015)
+ - [X] T172 [P] Unit test text commit only (no entry on no-op / abandoned) (`tests/unit/undo-text-noop.test.ts`) (FR-016, FR-018)
+ - [X] T173 [P] Unit test redo cleared after new change post-undo (`tests/unit/undo-redo-clear.test.ts`) (FR-006)
+ - [ ] T174 [P] Unit test deletion undo restores original relationships & removes interim edges (`tests/unit/undo-delete-restore.test.ts`) (FR-011)
+ - [ ] T175 [P] Unit test creation undo removes node & edges then redo restores identically (`tests/unit/undo-create-redo.test.ts`) (FR-009, FR-010)
+ - [ ] T176 [P] Unit test sequential mixed changes reverse in LIFO order (`tests/unit/undo-mixed-sequence.test.ts`) (FR-020)
+ - [ ] T177 [P] Unit test clone resets history (empty after switch) (`tests/unit/undo-clone-reset.test.ts`) (FR-027)
+ - [ ] T178 [P] Unit test graph switch resets history (`tests/unit/undo-graph-switch-reset.test.ts`) (FR-023)
+
+#### Integration Tests
+ - [ ] T179 [P] Integration test node deletion undo/redo full cycle (`tests/integration/undo-delete-cycle.spec.ts`) (FR-011, FR-012)
+ - [ ] T180 [P] Integration test text edit multi commits then multi undo (`tests/integration/undo-text-multi.spec.ts`) (FR-013, FR-016)
+ - [ ] T181 [P] Integration test move then undo then redo (`tests/integration/undo-move-cycle.spec.ts`) (FR-014)
+ - [ ] T182 [P] Integration test mixed sequence create/edit/move/delete undo chain (`tests/integration/undo-mixed-sequence.spec.ts`) (FR-005, FR-020)
+ - [ ] T183 [P] Integration test redo disabled after new change (`tests/integration/undo-redo-clear.spec.ts`) (FR-006)
+ - [ ] T184 [P] Integration test session reload clears history (buttons disabled) while graph state persisted (`tests/integration/undo-session-reload.spec.ts`) (FR-021)
+ - [ ] T185 [P] Integration test depth limit (perform 105 edits -> oldest 5 not undoable) (`tests/integration/undo-depth-limit.spec.ts`) (FR-026)
+
+#### Implementation Tasks
+ - [ ] T186 Implement history manager with depth 100 drop-oldest policy (FR-026)
+ - [ ] T187 Integrate creation/deletion/text/position commits to push entries (FR-003, FR-015, FR-016)
+ - [ ] T188 Implement undo operation (switch on entry type, ensure atomic state application) (FR-005, FR-009..FR-015)
+ - [ ] T189 Implement redo operation (FR-002, FR-010..FR-014)
+ - [ ] T190 Implement deletion undo relationship restoration & interim edge removal reconciliation (FR-011)
+ - [ ] T191 Implement redo for deletion with deterministic re-parent handles (FR-012)
+ - [ ] T192 Integrate redo clearing logic on new change after undo (FR-006)
+ - [ ] T193 Ensure exclusion of export/clone/theme/view actions (FR-004, FR-027, FR-028)
+ - [ ] T194 Wire Undo/Redo buttons disabled state logic (FR-007, FR-008, FR-022)
+ - [ ] T195 Add accessibility labels & aria-disabled states (FR-024)
+ - [ ] T196 Ensure atomic visual updates (batch state) during undo/redo (FR-025)
+ - [ ] T197 Reset history on graph switch & clone (FR-023, FR-027)
+ - [ ] T198 Prevent root creation/history pollution on load (baseline clean) (FR-021)
+ - [ ] T199 Documentation updates (quickstart + spec cross-link notes) (FR-001..FR-003 summary)
+
+#### Polish & Backlog
+ - [ ] T200 Add performance metric marks around undo/redo operations
+ - [ ] T201 Backlog: future keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z) design note
+ - [ ] T202 Backlog: multi-select grouped history entry
+ - [ ] T203 Backlog: text edit merge window option
+
 ## Dependencies
 - Setup (T001-T008) before tests.
 - All tests (T009-T024) must exist & fail before implementing core (T025+).

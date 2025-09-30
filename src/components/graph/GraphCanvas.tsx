@@ -34,22 +34,21 @@ const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
 };
 
 export const GraphCanvas: React.FC = () => {
-  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addNode, graph, updateViewport, selectNode, selectedNodeId } = useGraph();
+  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addConnectedNode, graph, updateViewport, selectNode, selectedNodeId } = useGraph();
   // Local React Flow controlled nodes (decoupled from store during drag for stability)
   const [flowNodes, setFlowNodes] = useState<any[]>([]);
   // Initialize / merge store nodes into local state (add new, update labels). Positions updated when not currently dragging.
   useEffect(() => {
     setFlowNodes(cur => {
       const byId = new Map(cur.map(n => [n.id, n]));
-      const next = nodes.map((n: any) => {
+      return nodes.map((n: any) => {
         const existing = byId.get(n.id);
         if (existing) {
-          // Keep existing position while dragging; we'll overwrite on commit via moveNode.
-          return { ...existing, data: { label: n.text || 'New Thought' } };
+          // Always sync committed position from store so undo/redo updates are reflected.
+          return { ...existing, position: { x: n.x, y: n.y }, data: { label: n.text || 'New Thought' } };
         }
         return { id: n.id, type: 'thought', position: { x: n.x, y: n.y }, data: { label: n.text || 'New Thought' }, tabIndex: 0 };
       });
-      return next;
     });
   }, [nodes]);
   const rfInstance = useReactFlow();
@@ -128,16 +127,13 @@ export const GraphCanvas: React.FC = () => {
       if (dist < DRAG_THRESHOLD) {
         return; // below threshold: cancel creation
       }
-      // Create node centered at drop point.
-  const NEW_W = 100; const NEW_H = 38; // adjusted to align with tighter padding/border
-      const newNode = addNode(endGraph.x - NEW_W / 2, endGraph.y - NEW_H / 2);
-      if (newNode) {
-        const opposite: Record<string, string> = { n: 's', s: 'n', e: 'w', w: 'e' };
-        const sourceHandleId = start.handleId;
-        const targetHandleId = sourceHandleId ? opposite[sourceHandleId] : undefined;
-        addEdge(start.nodeId, newNode.id, sourceHandleId, targetHandleId);
-        startEditing(newNode.id);
-      }
+      // Create node centered at drop point (atomic node+edge creation)
+      const NEW_W = 100; const NEW_H = 38; // adjusted to align with tighter padding/border
+      const opposite: Record<string, string> = { n: 's', s: 'n', e: 'w', w: 'e' };
+      const sourceHandleId = start.handleId;
+      const targetHandleId = sourceHandleId ? opposite[sourceHandleId] : undefined;
+      const newNode = addConnectedNode(start.nodeId, endGraph.x - NEW_W / 2, endGraph.y - NEW_H / 2, sourceHandleId, targetHandleId);
+      if (newNode) startEditing(newNode.id);
     }
   };
   // Dev aid: log whenever edge count changes (can remove later)
