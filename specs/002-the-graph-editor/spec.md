@@ -28,6 +28,7 @@ As a user exploring and refining ideas in a graph, I want to safely experiment (
 13. Delete Then Immediate Undo Selection: **Given** I delete a selected node, **When** I undo, **Then** the node reappears but selection/focus is not forcibly reassigned (no automatic focus restore).
 14. Multi-step Redo Forward Traversal: **Given** I perform 4 changes (A,B,C,D), then undo 3 (leaving only A applied and (B,C,D) in Redo), **When** I press Redo three times, **Then** the system reapplies B, then C, then D in chronological order and Redo becomes disabled afterward.
 15. Redo Disabled After New Change: **Given** I undo one step (making Redo available), **When** I perform a new eligible change E, **Then** Redo becomes disabled and only E (plus prior still-applied steps) remains undoable.
+16. Edge Handle Reconnection (Same Node): **Given** an existing edge whose source (or target) is connected to a specific handle on a node with multiple connector handles, **When** I grab that edge endpoint and drag it onto a different valid handle on the SAME node and release, **Then** the edge updates in-place (no new edge created, no orphan left behind), the visual connection reroutes immediately, and an undoable step is recorded so that Undo restores the previous handle mapping and Redo reapplies the new handle.
 
 ### Edge Cases
 - Undo / Redo invoked with no history (controls disabled; invocation is a no-op if somehow triggered).
@@ -83,6 +84,14 @@ As a user exploring and refining ideas in a graph, I want to safely experiment (
 - **FR-033**: Executing Redo MUST pop the top entry from the Redo Stack, apply its forward function, and push that entry back onto the Undo Stack.
 - **FR-034**: Pushing any new change (after at least one Undo) MUST clear the entire Redo Stack prior to inserting the new Undo entry (no branching histories retained).
 - **FR-035**: Redo traversal MUST restore steps strictly in their original chronological order (the order they were first applied) with no skipped entries.
+- **FR-036**: The user MUST be able to grab an existing edge endpoint (source or target) and drag it to a different valid connector handle on the SAME node to reattach it without creating a new edge.
+- **FR-037**: A successful edge endpoint reconnection (different handle than prior) MUST create exactly one undo history entry capturing previous and new handle identifiers.
+- **FR-038**: Undoing an edge reconnection MUST restore the prior handle attachment without altering other edge properties (id, opposite endpoint, metadata).
+- **FR-039**: Redoing an undone edge reconnection MUST reapply the new handle attachment exactly as first applied.
+- **FR-040**: Attempting to reconnect an endpoint to the SAME handle it already occupies MUST be treated as a no-op (no history entry recorded).
+- **FR-041**: Reconnection MUST NOT duplicate the edge, change its id, or transiently create an intermediate disconnected state visible longer than a single frame.
+- **FR-042**: Reconnection MUST preserve any edge-level data (labels, styling flags) unchanged aside from handle reference update.
+- **FR-043**: Reconnection operations MUST follow the same Redo invalidation rules (performing a new reconnection after an Undo clears Redo stack).
 
 ### Key Entities
 - **Change (History Entry)**: A record of a single reversible user-intent action on nodes: type (creation, deletion, text change, position change), target node identifier(s), prior observable state summary, resulting observable state summary, timestamp/order index. (Representation details intentionally abstracted.)
