@@ -50,6 +50,9 @@
   --mf-editor-text: var(--color-text);
   --mf-edge-halo-width: 12;
   --mf-edge-core-width: 4;
+  --mf-edge-core-color: #4f9dff; /* decouple from handle to keep full opacity */
+  --mf-edge-core-color-selected: #ffd84f;
+  --mf-edge-halo-color: rgba(255,255,255,0.22);
   --mf-handle-size: 10px;
   --mf-handle-border-width: 2px;
 }
@@ -62,13 +65,19 @@
   --mf-node-border-width: 0.5px; /* thinner */
   --mf-node-border-width-selected: 0.5px;
   --mf-node-text: #f2f2f2;
-  --mf-handle-source: #e7c34a;
-  --mf-handle-target: #6aa8e8;
+  /* Knock-back connector (source=yellow) + target (blue) by reducing luminosity & saturation
+     while maintaining minimum contrast for visibility (>=3:1 against bg). */
+  /* Semi-transparent (knock-back) connector handles; hover/focus can later increase opacity for affordance */
+  --mf-handle-source: rgba(153, 127, 45, 0.55); /* was #e7c34a then #997f2d */
+  --mf-handle-target: rgba(74, 109, 143, 0.55); /* was #6aa8e8 then #4a6d8f */
   --mf-selection-outline: 0 0 0 1px rgba(122,184,255,0.30); /* thinner outline */
   --mf-editor-bg: transparent;
   --mf-editor-text: #f2f2f2;
   --mf-edge-halo-width: 4; /* thinner halo */
   --mf-edge-core-width: 1; /* thinner core line */
+  --mf-edge-core-color: #6aa8e8; /* keep edges fully visible (not transparent) */
+  --mf-edge-core-color-selected: #e7c34a; /* selected matches original vivid colors */
+  --mf-edge-halo-color: rgba(255,255,255,0.18);
   --mf-handle-size: 8px; /* smaller handles */
   --mf-handle-border-width: 1px; /* thinner handle border */
 }
