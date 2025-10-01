@@ -1,15 +1,19 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
-import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, OnEdgesChange, Connection, Handle, Position, OnConnectStart, OnConnectEnd, useReactFlow, applyNodeChanges } from 'reactflow';
+import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, Connection, Handle, Position, OnConnectStart, OnConnectEnd, useReactFlow, applyNodeChanges } from 'reactflow';
 import { ThoughtEdge } from './ThoughtEdge';
 import { useGraph } from '../../state/graph-store';
 import { isPlacementValid } from '../../lib/distance';
 import { NOTE_W, NOTE_H, RECT_W, RECT_H, THOUGHT_W, THOUGHT_H } from '../../lib/annotation-constants';
-import { commitAnnotationCreation, createAnnotationNode } from '../../lib/graph-domain';
+// (creation helpers imported earlier are currently unused; keeping file lean)
 import 'reactflow/dist/style.css';
 import { ThoughtNode } from '../nodes/ThoughtNode';
 import { RectNode } from '../nodes/RectNode';
 import { NoteNode } from '../nodes/NoteNode';
 // Custom directional ghost/drag handles removed in favor of native React Flow connection UX.
+
+// Debug flag: when true, we visibly separate target handles from source handles so they don't overlap.
+// Set to false for normal UI; currently true per request to visualize distinct handle layers.
+const DEBUG_NODES = false; // toggle to false for production / standard appearance
 
 const handleStyle: React.CSSProperties = {
   width: 'var(--mf-handle-size)',
@@ -18,67 +22,74 @@ const handleStyle: React.CSSProperties = {
   background: 'var(--mf-handle-target)',
   zIndex: 1
 };
+// Thought node wrapper accepts flags (via data) to hide source or target handles while dragging
 const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
   const { id, data, selected } = props as any;
-  const targetOffset = -14; // outward offset for both source (blue) & target (yellow) handles
+  const sourceOffset = -14;
+  const targetOffset = DEBUG_NODES ? -30 : -14;
+  const hideSource = !!data?.hideSource;
+  const hideTarget = !!data?.hideTarget;
+  const hiddenStyle: React.CSSProperties = { display: 'none' };
   return (
     <div style={{ position: 'relative' }}>
-      <ThoughtNode id={id} text={data.label} selected={!!selected} />
-      {/* Directional source handles (stay inside edge of node) */}
-  <Handle type="source" id="n" position={Position.Top} style={{ ...handleStyle, background: 'var(--mf-handle-target)', top: targetOffset }} />
-  <Handle type="source" id="e" position={Position.Right} style={{ ...handleStyle, background: 'var(--mf-handle-target)', right: targetOffset }} />
-  <Handle type="source" id="s" position={Position.Bottom} style={{ ...handleStyle, background: 'var(--mf-handle-target)', bottom: targetOffset }} />
-  <Handle type="source" id="w" position={Position.Left} style={{ ...handleStyle, background: 'var(--mf-handle-target)', left: targetOffset }} />
-      {/* Directional target handles (shifted outside) */}
-  <Handle type="target" id="n" position={Position.Top} style={{ ...handleStyle, background: 'var(--mf-handle-source)', top: targetOffset }} />
-  <Handle type="target" id="e" position={Position.Right} style={{ ...handleStyle, background: 'var(--mf-handle-source)', right: targetOffset }} />
-  <Handle type="target" id="s" position={Position.Bottom} style={{ ...handleStyle, background: 'var(--mf-handle-source)', bottom: targetOffset }} />
-  <Handle type="target" id="w" position={Position.Left} style={{ ...handleStyle, background: 'var(--mf-handle-source)', left: targetOffset }} />
+      <ThoughtNode id={id} text={data?.label} selected={!!selected} />
+      {/* Source handles */}
+  <Handle type="source" id="n" position={Position.Top} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', top: sourceOffset }} />
+  <Handle type="source" id="e" position={Position.Right} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', right: sourceOffset }} />
+  <Handle type="source" id="s" position={Position.Bottom} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', bottom: sourceOffset }} />
+  <Handle type="source" id="w" position={Position.Left} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', left: sourceOffset }} />
+      {/* Target handles */}
+  <Handle type="target" id="n" position={Position.Top} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', top: targetOffset }} />
+  <Handle type="target" id="e" position={Position.Right} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', right: targetOffset }} />
+  <Handle type="target" id="s" position={Position.Bottom} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', bottom: targetOffset }} />
+  <Handle type="target" id="w" position={Position.Left} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', left: targetOffset }} />
     </div>
   );
 };
 
 export const GraphCanvas: React.FC = () => {
-  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addConnectedNode, graph, updateViewport, selectNode, activeTool, addAnnotation } = useGraph();
+  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addConnectedNode, graph, updateViewport, selectNode, activeTool, addAnnotation, updateEdgeHandles } = useGraph() as any;
   // Local React Flow controlled nodes (decoupled from store during drag for stability)
   const [flowNodes, setFlowNodes] = useState<any[]>([]);
+  // Track handle drag type so we can hide the opposite type while dragging to prevent overlap confusion
+  const [activeDragType, setActiveDragType] = useState<'source' | 'target' | null>(null);
   // Initialize / merge store nodes into local state (add new, update labels). Positions updated when not currently dragging.
   useEffect(() => {
     setFlowNodes(cur => {
       const byId = new Map(cur.map(n => [n.id, n]));
       return nodes.map((n: any) => {
-        // z layering:
-        // -1 => annotation behind (should sit below edges & thought nodes)
-        // 10 => thought baseline
-        // 15 => annotation front (above thoughts)
         const isAnnotation = n.nodeKind === 'note' || n.nodeKind === 'rect';
-        const front = n.frontFlag !== false; // default true
+        const front = n.frontFlag !== false;
         const zIndex = isAnnotation ? (front ? 15 : -1) : 10;
         const baseType = n.nodeKind && n.nodeKind !== 'thought' ? n.nodeKind : 'thought';
         const sizeStyle = (n.nodeKind === 'rect')
           ? { width: n.width || RECT_W, height: n.height || RECT_H }
           : (n.nodeKind === 'note' ? { width: n.width || NOTE_W, height: n.height || NOTE_H } : {});
+  // Updated logic (user clarification):
+  // When dragging a TARGET endpoint, we want only SOURCE ports available -> hideTarget true in that case.
+  // When dragging a SOURCE endpoint, we want only TARGET ports available -> hideSource true in that case.
+  const commonData = { hideSource: activeDragType === 'source', hideTarget: activeDragType === 'target' };
         if (byId.has(n.id)) {
           const existing = byId.get(n.id)!;
-            return {
+          return {
             ...existing,
             position: { x: n.x, y: n.y },
             style: { ...(existing.style || {}), ...sizeStyle, zIndex },
-            data: { label: n.text || 'New Thought', raw: n },
+            data: { label: n.text || 'New Thought', raw: n, ...commonData },
             type: baseType
           };
         }
         return {
           id: n.id,
           type: baseType,
-          position: { x: n.x, y: n.y },
+            position: { x: n.x, y: n.y },
           style: { ...sizeStyle, zIndex },
-          data: { label: n.text || (baseType === 'note' ? 'Note' : 'New Thought'), raw: n },
+          data: { label: n.text || (baseType === 'note' ? 'Note' : 'New Thought'), raw: n, ...commonData },
           tabIndex: 0
         };
       });
     });
-  }, [nodes]);
+  }, [nodes, activeDragType]);
   const rfInstance = useReactFlow();
   useEffect(() => {
     if (graph?.viewport) {
@@ -100,19 +111,34 @@ export const GraphCanvas: React.FC = () => {
       sourceHandle: e.sourceHandleId,
       targetHandle: e.targetHandleId,
       type: 'thought-edge',
-      selectable: true,
-      data: {},
+      updatable: true
     })),
     [edges]
   );
+  // Native edge update only (fallback logic removed)
+  // When updating an existing edge endpoint, hide opposite handles
+  const onEdgeUpdateStart = (_: any, __: any, handleType: 'source' | 'target') => {
+    if (handleType) {
+      // eslint-disable-next-line no-console
+      console.log('[connector drag start][update]', handleType);
+      setActiveDragType(handleType);
+    }
+  };
+  const onEdgeUpdateEnd = () => { setActiveDragType(null); };
+  const onEdgeUpdate = (oldEdge: any, newConnection: any) => {
+    if (!oldEdge) return;
+    updateEdgeHandles(oldEdge.id, newConnection.sourceHandle, newConnection.targetHandle);
+  };
   const onNodesChange: OnNodesChange = (changes) => {
     setFlowNodes(ns => applyNodeChanges(changes, ns));
   };
+  // Persist final position after drag
   const onNodeDragStop = (_: React.MouseEvent, node: Node) => {
-    // Persist final position to store
     moveNode(node.id, node.position.x, node.position.y);
   };
-  const onEdgesChange: OnEdgesChange = () => { /* edge selection not yet persisted */ };
+  // We no longer custom-handle edge selection
+  const onEdgesChange = undefined;
+  // Add edge when both ends valid
   const onConnect = (connection: Connection) => {
     if (connection.source && connection.target) {
       addEdge(connection.source, connection.target, connection.sourceHandle ?? undefined, connection.targetHandle ?? undefined);
@@ -130,14 +156,19 @@ export const GraphCanvas: React.FC = () => {
       clientY = evt.touches[0].clientY;
     }
     connectStartRef.current = { nodeId: params.nodeId, handleId: params.handleId as string | undefined, startClientX: clientX, startClientY: clientY };
+    if (params.handleType === 'source' || params.handleType === 'target') {
+      // eslint-disable-next-line no-console
+      console.log('[connector drag start][new]', params.handleType);
+      setActiveDragType(params.handleType as 'source' | 'target');
+    }
   };
 
   const onConnectEnd: OnConnectEnd = (evt) => {
     const start = connectStartRef.current;
     connectStartRef.current = null;
-    if (!start) return;
+    if (!start) { setActiveDragType(null); return; }
+    setActiveDragType(null);
     const target = evt.target as HTMLElement | null;
-    // If released on pane (not on another handle) create a new node.
     if (target && target.classList.contains('react-flow__pane')) {
       let clientX = 0; let clientY = 0;
       if ('clientX' in evt) {
@@ -152,11 +183,8 @@ export const GraphCanvas: React.FC = () => {
       const dx = endGraph.x - startGraph.x;
       const dy = endGraph.y - startGraph.y;
       const dist = Math.hypot(dx, dy);
-      if (dist < DRAG_THRESHOLD) {
-        return; // below threshold: cancel creation
-      }
-      // Create node centered at drop point (atomic node+edge creation)
-      const NEW_W = 100; const NEW_H = 38; // adjusted to align with tighter padding/border
+      if (dist < DRAG_THRESHOLD) return;
+      const NEW_W = 100; const NEW_H = 38;
       const opposite: Record<string, string> = { n: 's', s: 'n', e: 'w', w: 'e' };
       const sourceHandleId = start.handleId;
       const targetHandleId = sourceHandleId ? opposite[sourceHandleId] : undefined;
@@ -165,10 +193,7 @@ export const GraphCanvas: React.FC = () => {
     }
   };
   // Dev aid: log whenever edge count changes (can remove later)
-  React.useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.debug('[GraphCanvas] edges updated', edges.map((e: { id: string; sourceNodeId: string; targetNodeId: string }) => ({ id: e.id, s: e.sourceNodeId, t: e.targetNodeId })));
-  }, [edges]);
+  // Optional dev log removed for cleaner standard behavior
   const RectWrapper: React.FC<NodeProps> = (props) => {
     const { id, selected } = props as any;
     return <RectNode id={id} selected={!!selected} />;
@@ -201,6 +226,10 @@ export const GraphCanvas: React.FC = () => {
   onConnect={onConnect}
   onConnectStart={onConnectStart}
   onConnectEnd={onConnectEnd}
+  onEdgeUpdateStart={onEdgeUpdateStart}
+  onEdgeUpdateEnd={onEdgeUpdateEnd}
+  onEdgeUpdate={onEdgeUpdate}
+  edgesUpdatable
         nodesDraggable
         nodesConnectable={true}
         elementsSelectable
@@ -213,7 +242,7 @@ export const GraphCanvas: React.FC = () => {
           const h = activeTool === 'note' ? NOTE_H : RECT_H;
           const candidate = { x: point.x - w / 2, y: point.y - h / 2, w, h };
           // Build existing boxes - approximate thought size; annotation sizes unknown yet so treat existing annotation nodes similarly for now.
-          const existing = nodes.map(n => ({
+          const existing = nodes.map((n: any) => ({
             x: n.x,
             y: n.y,
             w: n.nodeKind === 'rect' ? (n.width || RECT_W) : (n.nodeKind === 'note' ? NOTE_W : THOUGHT_W),
@@ -227,7 +256,8 @@ export const GraphCanvas: React.FC = () => {
             requestAnimationFrame(() => startEditing(created.id));
           }
         }}
-        defaultEdgeOptions={{ type: 'thought-edge', style: { pointerEvents: 'none' } }}
+  defaultEdgeOptions={{ type: 'thought-edge', updatable: true }}
+  edgeUpdaterRadius={28}
   style={{ background: '#0d0f17' }}
         onMoveEnd={(_, viewport) => { updateViewport(viewport.x, viewport.y, viewport.zoom); }}
       >

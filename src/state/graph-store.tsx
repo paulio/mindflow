@@ -42,6 +42,7 @@ interface GraphContext extends GraphState {
   addAnnotation(kind: 'note' | 'rect', x: number, y: number): void;
   resizeRectangle(nodeId: string, width: number, height: number, gesture?: { prevWidth: number; prevHeight: number; prevX: number; prevY: number; newX?: number; newY?: number }): void;
   resizeRectangleEphemeral(nodeId: string, width: number, height: number, x: number, y: number): void;
+  updateEdgeHandles(edgeId: string, sourceHandleId?: string | null, targetHandleId?: string | null): void;
 }
 
 const Ctx = createContext<GraphContext | null>(null);
@@ -674,6 +675,30 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   }, [graph]);
 
+  // Minimal edge handle update (no undo yet) to support interactive endpoint dragging
+  const updateEdgeHandles = useCallback((edgeId: string, sourceHandleId?: string | null, targetHandleId?: string | null) => {
+    if (!graph) return;
+    setEdges(es => es.map(e => {
+      if (e.id !== edgeId) return e;
+      // eslint-disable-next-line no-console
+      console.debug('[updateEdgeHandles]', {
+        edgeId,
+        prevSource: e.sourceHandleId,
+        prevTarget: e.targetHandleId,
+        nextSource: sourceHandleId,
+        nextTarget: targetHandleId
+      });
+      const next: EdgeRecord = {
+        ...e,
+        sourceHandleId: sourceHandleId === undefined ? e.sourceHandleId : sourceHandleId || undefined,
+        targetHandleId: targetHandleId === undefined ? e.targetHandleId : targetHandleId || undefined,
+        lastModified: new Date().toISOString()
+      } as EdgeRecord;
+      void saveEdges(graph.id!, [next]);
+      return next;
+    }));
+  }, [graph]);
+
   // Update note alignment (horizontal / vertical) with undo (notes only)
   const updateNoteAlignment = useCallback((nodeId: string, h?: 'left'|'center'|'right', v?: 'top'|'middle'|'bottom') => {
     if (!graph) return;
@@ -702,6 +727,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return n;
     }));
   }, [graph]);
+
   const toggleTool = useCallback((tool: 'note' | 'rect') => {
     setActiveTool(prev => {
       if (prev === tool) {
@@ -732,7 +758,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

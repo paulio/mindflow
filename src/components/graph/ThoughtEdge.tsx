@@ -14,7 +14,8 @@ export const ThoughtEdge: React.FC<EdgeProps> = (props) => {
         path={path}
         style={{
           stroke: 'var(--mf-edge-halo-color, rgba(255,255,255,0.2))',
-          strokeWidth: 'var(--mf-edge-halo-width, 12)'
+          strokeWidth: 'var(--mf-edge-halo-width, 12)',
+          pointerEvents: 'none'
         }}
       />
       {/* Core line (opaque, not affected by semi-transparent handle tokens) */}
@@ -23,7 +24,8 @@ export const ThoughtEdge: React.FC<EdgeProps> = (props) => {
         markerEnd={markerEnd}
         style={{
           stroke: selected ? 'var(--mf-edge-core-color-selected, #ffd84f)' : 'var(--mf-edge-core-color, #4f9dff)',
-          strokeWidth: 'var(--mf-edge-core-width, 4)'
+          strokeWidth: 'var(--mf-edge-core-width, 4)',
+          pointerEvents: 'stroke'
         }}
       />
     </g>

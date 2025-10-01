@@ -1,8 +1,8 @@
 
-# Implementation Plan: [FEATURE]
+# Implementation Plan: Graph Editor Undo / Redo & Edge Endpoint Reconnection
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+**Branch**: `002-the-graph-editor` | **Date**: 2025-09-30 | **Spec**: `specs/002-the-graph-editor/spec.md`
+**Input**: Feature specification (undo/redo requirements + added FR-036–FR-043 for edge endpoint reconnection on the same node)
 
 ## Execution Flow (/plan command scope)
 ```
@@ -31,18 +31,34 @@
 - Phase 3-4: Implementation execution (manual or via tools)
 
 ## Summary
-[Extract from feature spec: primary requirement + technical approach from research]
+Implement a robust, bounded (depth=100) undo/redo system for node-centric graph edits (create, delete, text edit, position move) and EXTEND it to support in‑place edge endpoint reconnection (reattaching an existing edge endpoint to a different handle on the SAME node) with full undo/redo fidelity. Edge reconnection must mutate only the handle reference (sourceHandle / targetHandle) while preserving edge id and metadata. No new edge objects are created; no duplicates; reconnect no-op if dropped back on original handle.
+
+High-level technical approach:
+- Represent history as array + pointer (logical two-stack semantics) to satisfy FR-031..FR-035.
+- Introduce new history entry type: `edge-reconnect` capturing: `edgeId`, `endpoint` ("source" | "target"), `prevHandle`, `nextHandle`, timestamp.
+- Integrate with React Flow edge update mechanics (e.g. `onEdgeUpdateStart`, `onEdgeUpdate`, or custom pointer tracking if default doesn't surface same-node handle changes) ensuring single commit per reconnection gesture.
+- Guarantee atomic UI update: edge visually re-routes in next render; history entry pushed post-drop; Redo stack cleared if prior undos exist.
 
 ## Technical Context
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
-**Project Type**: [single/web/mobile - determines source structure]  
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**Language/Version**: TypeScript (ESNext) + React 19
+**Primary Dependencies**: React Flow 11.x, Zustand-style custom store (graph-store), Vite toolchain
+**Storage**: IndexedDB (via idb) for persisted graph & nodes; history kept in-memory only (session scoped)
+**Testing**: Vitest (unit/contract), Playwright (integration & a11y)
+**Target Platform**: Browser (desktop, modern evergreen)
+**Project Type**: Single-page web application (frontend only)
+**Performance Goals**: Undo/redo observable latency < 16ms typical (target: UI feels instantaneous); reconnection gesture no dropped frames (>55fps typical)
+**Constraints**: History depth max 100 (memory bound); reconnection must not create additional edge objects; accessible controls (WCAG focus & ARIA labels)
+**Scale/Scope**: Medium local graphs (hundreds of nodes/edges) without server sync yet
+
+### Additional Unknowns / Clarifications Needed
+- Confirm existing handle identifiers scheme (naming, uniqueness) for capturing `prevHandle` / `nextHandle`.
+- Determine React Flow event surface needed for same-node endpoint drag (verify `onEdgeUpdate` triggers when reattaching within same node). If insufficient, implement custom drag logic overlaying endpoint hotspot detection.
+- Ensure undo action for reconnection does not conflict with simultaneous node move gestures (lock out while dragging endpoint?).
+
+### Preliminary Decisions
+- Use a distinct action discriminator: `edge-reconnect` (no merging with move operations).
+- Do not record ephemeral handle hover; only final drop commit.
+- Validation: if target handle === previous handle → skip push (FR-040).
 
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
@@ -110,7 +126,9 @@ directories captured above]
 
 ## Phase 0: Outline & Research
 1. **Extract unknowns from Technical Context** above:
-   - For each NEEDS CLARIFICATION → research task
+   - Handle id scheme adequacy (are they stable & deterministic?)
+   - React Flow support for intra-node reconnection events
+   - Accessibility impact (announce reconnection? maybe not in first cut)
    - For each dependency → best practices task
    - For each integration → patterns task
 
@@ -141,6 +159,7 @@ directories captured above]
    - For each user action → endpoint
    - Use standard REST/GraphQL patterns
    - Output OpenAPI/GraphQL schema to `/contracts/`
+   - (Note: current feature mostly client-side; edge reconnection may not require server contract unless future sync planned. Document as N/A or placeholder.)
 
 3. **Generate contract tests** from contracts:
    - One test file per endpoint
@@ -149,6 +168,7 @@ directories captured above]
 
 4. **Extract test scenarios** from user stories:
    - Each story → integration test scenario
+   - Add scenario: Edge endpoint reconnection undo/redo (cover no-op when same handle dropped)
    - Quickstart test = story validation steps
 
 5. **Update agent file incrementally** (O(1) operation):
@@ -177,6 +197,7 @@ directories captured above]
 - TDD order: Tests before implementation 
 - Dependency order: Models before services before UI
 - Mark [P] for parallel execution (independent files)
+ - Include tasks: implement `edge-reconnect` action type, add undo handlers, add Playwright spec for reconnection & undo/redo, unit test for action reducer.
 
 **Estimated Output**: 25-30 numbered, ordered tasks in tasks.md
 

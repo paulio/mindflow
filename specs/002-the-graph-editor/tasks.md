@@ -58,6 +58,10 @@ Map these directly to Acceptance Scenarios (#1–#15):
 - [ ] U063 Scenario 13: Delete → Undo does not auto-select restored node (FR-011, selection nuance).
 - [ ] U064 Scenario 14: Multi-step redo (undo 3; redo 3 in original order) (FR-035).
 - [ ] U065 Scenario 15: Redo disabled after divergence (FR-006, FR-034).
+// Edge Reconnection Scenarios (extends list: Acceptance Scenario 16)
+- [ ] U066 Scenario 16: Edge endpoint reconnection (same node) updates handle & is undoable (FR-036, FR-037, FR-038, FR-039).
+- [ ] U067 Scenario 16b: Reconnection to same handle is a no-op (no history entry) (FR-040).
+- [ ] U068 Scenario 16c: Edge metadata (id, labels placeholder) unchanged after reconnection + undo/redo (FR-041, FR-042).
 
 ## Phase U3: Implementation Tasks (Execute After Tests Are Red)
 - [ ] U100 Add internal documentation comment in `undo-stack.ts` describing logical two-stack equivalence (FR-031 conceptual clarity).
@@ -77,23 +81,41 @@ Map these directly to Acceptance Scenarios (#1–#15):
 - [ ] U114 Batch state updates within undo/redo functions to avoid intermediate paints (FR-025 visual atomicity).
 - [ ] U115 Strengthen type for `UndoEntry.type` to union of known plus extensible string (dev ergonomics).
 - [ ] U116 Add optional development-only inspection helper (e.g., `window.__undoDebug()`) (DX aid; not part of prod bundle) (Plan Phase Hardening).
+// Edge Reconnection Implementation
+- [ ] U117 Add `edge-reconnect` action type to undo stack type union.
+- [ ] U118 Implement edge endpoint drag-to-different-handle logic (capture start handle id & endpoint role).
+- [ ] U119 On successful drop to a different handle: mutate edge `sourceHandleId` or `targetHandleId`, emit `edge:reconnected` event, push undo entry (FR-036..FR-039).
+- [ ] U121 Guard: if drop handle === original handle → skip pushUndo (FR-040).
+- [ ] U122 Ensure undo restores previous handle and redo re-applies new handle (FR-038, FR-039).
+- [ ] U123 Preserve edge object identity (no new id) and all other fields (FR-041, FR-042).
+- [ ] U124 Clear redo stack upon new reconnection after undo (reuse existing divergence logic) (FR-043 synergy with FR-034).
+- [ ] U125 Add developer log (dev mode only) for reconnection events for traceability; remove in cleanup phase.
 
 ## Phase U4: Documentation & Developer Experience
 - [ ] U120 Update `spec.md` Execution Status checklist marking tests/implementation milestones.
 - [ ] U121 Add README or section in existing docs: "Undo/Redo Internals" explaining entry authoring rules (FR traceability).
 - [ ] U122 Update `serialization-contract.md` to explicitly state history excluded from persistence (FR-021 reassurance).
 - [ ] U123 Add comment headers to each undo/redo implementation block referencing FR IDs.
+// Edge Reconnection Docs
+- [ ] U126 Update spec checklist marking FR-036..FR-043 coverage.
+- [ ] U127 Add section to internal docs describing edge reconnection lifecycle and event sequence.
 
 ## Phase U5: Hardening & Performance
 - [ ] U130 Manual stress: 50 rapid alternating undo/redo cycles no drift (FR-017 stability).
 - [ ] U131 Performance measure: average undo/redo execution <5ms for mid-sized (e.g., 50 nodes) (non-functional objective).
 - [ ] U132 Add dev metrics marks `undo:apply` / `redo:apply` in `metrics.ts` (traceability & future profiling).
 - [ ] U133 Exploratory test: Interleave undo/redo with new creations mid-sequence (branch prevention) (FR-034).
+// Edge Reconnection Hardening
+- [ ] U134 Stress: 25 rapid reconnections on same edge cycles between two handles (no memory leak, stable undo depth) (FR-036..FR-039).
+- [ ] U135 Performance sample: reconnection apply + undo each <5ms median (profiling note).
+- [ ] U136 Edge reconnection while another node is being moved is prevented or gracefully deferred (decide & document) (stability).
 
 ## Phase U6: Cleanup
 - [ ] U140 Remove any temporary debug logging added during implementation (retain metrics).
 - [ ] U141 Final lint & type pass.
 - [ ] U142 Ensure coverage thresholds met (undo/redo modules ≥ 90%).
+// Edge Reconnection Cleanup
+- [ ] U143 Remove temporary reconnection debug logs (retain structured metrics if added).
 
 ## Optional / Backlog
 - [ ] U150 Keyboard shortcuts (Ctrl+Z / Shift+Ctrl+Z) (FR-029 future).
@@ -141,6 +163,14 @@ Map these directly to Acceptance Scenarios (#1–#15):
 | FR-033 | U010, U102 |
 | FR-034 | U023, U057, U065, U101, U133 |
 | FR-035 | U034, U064, U102 |
+| FR-036 | U066, U117, U118, U119 |
+| FR-037 | U066, U119 |
+| FR-038 | U066, U119, U122 |
+| FR-039 | U066, U119, U122 |
+| FR-040 | U067, U121 |
+| FR-041 | U068, U123 |
+| FR-042 | U068, U123 |
+| FR-043 | U124 (uses existing divergence logic), U066 |
 
 ## Ordering / Dependencies
 1. U010–U035 (tests) before U100–U116 (implementation).

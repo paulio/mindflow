@@ -9,6 +9,7 @@ export type EventName =
   | 'node:deleted'
   | 'edge:created'
   | 'edge:deleted'
+  | 'edge:reconnected'
   | 'autosave:success'
   | 'autosave:failure'
   | 'undo:applied'
@@ -31,6 +32,7 @@ export interface EventPayloads {
   'node:deleted': { graphId: string; nodeId: string };
   'edge:created': { graphId: string; edgeId: string };
   'edge:deleted': { graphId: string; edgeId: string };
+  'edge:reconnected': { edgeId: string; endpoint: 'source'|'target'; prevHandle?: string; newHandle?: string };
   'autosave:success': { entityType: string; count: number; elapsedMs: number };
   'autosave:failure': { entityType: string; attempt: number; error: unknown };
   'undo:applied': { actionType: string };
