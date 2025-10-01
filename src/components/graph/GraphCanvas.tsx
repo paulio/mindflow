@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
-import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, Connection, Handle, Position, OnConnectStart, OnConnectEnd, useReactFlow, applyNodeChanges } from 'reactflow';
+import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, Connection, Handle, Position, OnConnectStart, OnConnectEnd, useReactFlow, applyNodeChanges, MarkerType } from 'reactflow';
 import { ThoughtEdge } from './ThoughtEdge';
+import { ReferenceEdge } from './ReferenceEdge';
 import { useGraph } from '../../state/graph-store';
 import { isPlacementValid } from '../../lib/distance';
 import { NOTE_W, NOTE_H, RECT_W, RECT_H, THOUGHT_W, THOUGHT_H } from '../../lib/annotation-constants';
@@ -47,8 +48,22 @@ const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
   );
 };
 
+// Stable top-level node/edge type maps (avoid recreation warnings from React Flow)
+const NodeTypesConst = {
+  thought: ThoughtNodeWrapper,
+  note: (props: any) => { const { id, data, selected } = props; return <NoteNode id={id} text={data.label} selected={!!selected} />; },
+  rect: (props: any) => { const { id, selected } = props; return <RectNode id={id} selected={!!selected} />; }
+};
+const EdgeTypesConst = {
+  'thought-edge': ThoughtEdge,
+  'reference-edge': ReferenceEdge
+};
+
+// Reference connection arrow marker size (halved from previous 18)
+const REFERENCE_MARKER_SIZE = 9;
+
 export const GraphCanvas: React.FC = () => {
-  const { nodes, edges, startEditing, editingNodeId, moveNode, addEdge, addConnectedNode, graph, updateViewport, selectNode, activeTool, addAnnotation, updateEdgeHandles } = useGraph() as any;
+  const { nodes, edges, references, selectedReferenceId, selectReference, deleteReference, startEditing, editingNodeId, moveNode, addEdge, addConnectedNode, graph, updateViewport, selectNode, activeTool, addAnnotation, updateEdgeHandles, createReference, repositionReference } = useGraph() as any;
   // Local React Flow controlled nodes (decoupled from store during drag for stability)
   const [flowNodes, setFlowNodes] = useState<any[]>([]);
   // Track handle drag type so we can hide the opposite type while dragging to prevent overlap confusion
@@ -103,18 +118,42 @@ export const GraphCanvas: React.FC = () => {
 
   const DRAG_THRESHOLD = 80; // px in flow space (after zoom scaling) consistent with earlier spec
   const rfNodes = flowNodes; // already memoized by state
-  const rfEdges = useMemo(
-    () => edges.map((e: any) => ({
+  const rfEdges = useMemo(() => {
+    const thoughtEdges = edges.map((e: any) => ({
       id: e.id,
       source: e.sourceNodeId,
       target: e.targetNodeId,
       sourceHandle: e.sourceHandleId,
       targetHandle: e.targetHandleId,
       type: 'thought-edge',
-      updatable: true
-    })),
-    [edges]
-  );
+      data: {},
+      selectable: true,
+      selected: false
+    }));
+    const refEdges = references.map((r: any) => {
+      const styleValue = r.style || 'single';
+      // Visual issue: React Flow currently renders our former markerEnd at the perceived source side.
+      // To place arrow at logical target, we invert: use markerStart for single-arrow, both for double.
+      const arrowAtTarget = styleValue === 'single' || styleValue === 'double';
+      const arrowAtSource = styleValue === 'double';
+      const isSelected = selectedReferenceId === r.id;
+      return {
+        id: r.id,
+        source: r.sourceNodeId,
+        target: r.targetNodeId,
+        sourceHandle: r.sourceHandleId,
+        targetHandle: r.targetHandleId,
+        type: 'reference-edge',
+        data: { ref: true, style: styleValue, labelHidden: r.labelHidden, label: r.label },
+        markerStart: arrowAtTarget ? { type: MarkerType.ArrowClosed, color: isSelected ? '#ff0' : '#888', width: REFERENCE_MARKER_SIZE, height: REFERENCE_MARKER_SIZE } : undefined,
+        markerEnd: arrowAtSource ? { type: MarkerType.ArrowClosed, color: isSelected ? '#ff0' : '#888', width: REFERENCE_MARKER_SIZE, height: REFERENCE_MARKER_SIZE } : undefined,
+        style: { stroke: isSelected ? '#ff0' : '#888', strokeWidth: isSelected ? 3 : 2, cursor: 'pointer' },
+        selectable: true,
+        selected: isSelected
+      };
+    });
+    return [...thoughtEdges, ...refEdges];
+  }, [edges, references, selectedReferenceId]);
   // Native edge update only (fallback logic removed)
   // When updating an existing edge endpoint, hide opposite handles
   const onEdgeUpdateStart = (_: any, __: any, handleType: 'source' | 'target') => {
@@ -127,7 +166,13 @@ export const GraphCanvas: React.FC = () => {
   const onEdgeUpdateEnd = () => { setActiveDragType(null); };
   const onEdgeUpdate = (oldEdge: any, newConnection: any) => {
     if (!oldEdge) return;
-    updateEdgeHandles(oldEdge.id, newConnection.sourceHandle, newConnection.targetHandle);
+    if (oldEdge.data?.ref) {
+      // Reposition reference endpoints
+      if (!newConnection.source || !newConnection.target) return;
+      repositionReference(oldEdge.id, newConnection.source, newConnection.target, newConnection.sourceHandle, newConnection.targetHandle);
+    } else {
+      updateEdgeHandles(oldEdge.id, newConnection.sourceHandle, newConnection.targetHandle);
+    }
   };
   const onNodesChange: OnNodesChange = (changes) => {
     setFlowNodes(ns => applyNodeChanges(changes, ns));
@@ -141,7 +186,10 @@ export const GraphCanvas: React.FC = () => {
   // Add edge when both ends valid
   const onConnect = (connection: Connection) => {
     if (connection.source && connection.target) {
-      addEdge(connection.source, connection.target, connection.sourceHandle ?? undefined, connection.targetHandle ?? undefined);
+      // Create a reference connection instead of a structural thought edge
+      createReference(connection.source, connection.target, 'single', connection.sourceHandle ?? undefined, connection.targetHandle ?? undefined);
+      // eslint-disable-next-line no-console
+      console.log('[createReference]', { source: connection.source, target: connection.target });
     }
   };
 
@@ -202,8 +250,29 @@ export const GraphCanvas: React.FC = () => {
     const { id, data, selected } = props as any;
     return <NoteNode id={id} text={data.label} selected={!!selected} />;
   };
-  const nodeTypes = useMemo(() => ({ thought: ThoughtNodeWrapper, note: NoteWrapper, rect: RectWrapper }), []);
-  const edgeTypes = useMemo(() => ({ 'thought-edge': ThoughtEdge }), []);
+  // Remove useMemo for nodeTypes/edgeTypes; use stable top-level constants instead
+  const nodeTypes = NodeTypesConst as any;
+  const edgeTypes = EdgeTypesConst as any;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!selectedReferenceId) return;
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      // If focus is inside a text-editing context, don't treat Delete as a graph command.
+      const active = document.activeElement as HTMLElement | null;
+      if (active) {
+        const tag = active.tagName;
+        const editable = active.getAttribute('contenteditable');
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (editable && editable !== 'false')) {
+          return; // allow normal deletion within the field
+        }
+      }
+      e.preventDefault();
+      deleteReference(selectedReferenceId);
+      selectReference(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedReferenceId, deleteReference, selectReference]);
   return (
     <div style={{ flex: 1 }}>
     <ReactFlow
@@ -216,6 +285,9 @@ export const GraphCanvas: React.FC = () => {
   onEdgesChange={onEdgesChange}
   onNodeDragStop={onNodeDragStop}
         zoomOnDoubleClick={false}
+        zoomOnScroll={false}
+        zoomOnPinch={false}
+        panOnScroll={false}
   onNodeClick={(_, node) => { selectNode(node.id); }}
         onNodeDoubleClick={(e: React.MouseEvent, node: Node) => {
           e.preventDefault();
@@ -229,12 +301,28 @@ export const GraphCanvas: React.FC = () => {
   onEdgeUpdateStart={onEdgeUpdateStart}
   onEdgeUpdateEnd={onEdgeUpdateEnd}
   onEdgeUpdate={onEdgeUpdate}
+  onEdgeClick={(e, edge) => {
+          const isReference = edge.data && (edge.data as any).ref;
+          // eslint-disable-next-line no-console
+          console.log('[EdgeClick]', { edgeId: edge.id, rfType: edge.type, reference: isReference });
+          if (isReference) {
+            e.stopPropagation();
+            selectReference(edge.id);
+          } else {
+            selectReference(null);
+          }
+        }}
   edgesUpdatable
         nodesDraggable
         nodesConnectable={true}
         elementsSelectable
         connectOnClick={false}
         onPaneClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (target && target.classList.contains('react-flow__pane')) {
+            selectReference(null);
+            selectNode(null);
+          }
           if (!graph) return;
           if (!activeTool) return; // FR-024
           const point = rfInstance.screenToFlowPosition({ x: (e as any).clientX, y: (e as any).clientY });
@@ -258,7 +346,7 @@ export const GraphCanvas: React.FC = () => {
         }}
   defaultEdgeOptions={{ type: 'thought-edge', updatable: true }}
   edgeUpdaterRadius={28}
-  style={{ background: '#0d0f17' }}
+  style={{ background: '#0d0f17', touchAction: 'none' }}
         onMoveEnd={(_, viewport) => { updateViewport(viewport.x, viewport.y, viewport.zoom); }}
       >
         <Background />

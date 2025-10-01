@@ -47,7 +47,26 @@
           "x": {"type": "number"},
           "y": {"type": "number"},
           "created": {"type": "string", "format": "date-time"},
-          "lastModified": {"type": "string", "format": "date-time"}
+          "lastModified": {"type": "string", "format": "date-time"},
+          "nodeKind": {"type": "string", "enum": ["thought","note","rect"]},
+          "bgColor": {"type": "string"},
+          "textColor": {"type": "string"},
+          "frontFlag": {"type": "boolean"},
+          "width": {"type": "number"},
+          "height": {"type": "number"},
+          "textAlign": {"type": "string", "enum": ["left","center","right"]},
+          "textVAlign": {"type": "string", "enum": ["top","middle","bottom"]},
+          "fontFamily": {"type": "string"},
+          "fontSize": {"type": "number", "minimum": 1, "maximum": 256},
+          "fontWeight": {"anyOf": [ {"type": "string"}, {"type": "number"} ]},
+          "italic": {"type": "boolean"},
+          "underline": {"type": "boolean"},
+          "highlight": {"type": "boolean"},
+          "backgroundOpacity": {"type": "number", "minimum": 0, "maximum": 100},
+          "overflowMode": {"type": "string", "enum": ["truncate","auto-resize","scroll"]},
+          "hideShapeWhenUnselected": {"type": "boolean"},
+          "maxWidth": {"type": "number"},
+          "maxHeight": {"type": "number"}
         },
         "additionalProperties": false
       }

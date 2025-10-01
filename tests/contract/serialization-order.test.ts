@@ -4,8 +4,8 @@ import { sortNodesDeterministic, sortEdgesDeterministic } from '../../src/lib/gr
 describe('Serialization Ordering Contract', () => {
   it('enforces nodes then edges ordering', () => {
     const nodes = [
-      { id: 'b', graphId: 'g', text: '', x:0, y:0, created: '2025-01-02T00:00:00.000Z', lastModified: '2025-01-02T00:00:00.000Z' },
-      { id: 'a', graphId: 'g', text: '', x:0, y:0, created: '2025-01-01T00:00:00.000Z', lastModified: '2025-01-01T00:00:00.000Z' }
+      { id: 'b', graphId: 'g', text: '', x:0, y:0, created: '2025-01-02T00:00:00.000Z', lastModified: '2025-01-02T00:00:00.000Z', nodeKind:'note' as const, fontFamily:'Inter', fontSize:16, overflowMode:'auto-resize' as const, backgroundOpacity:90 },
+      { id: 'a', graphId: 'g', text: '', x:0, y:0, created: '2025-01-01T00:00:00.000Z', lastModified: '2025-01-01T00:00:00.000Z', nodeKind:'note' as const, fontFamily:'Georgia', fontSize:14, overflowMode:'truncate' as const, backgroundOpacity:100 }
     ];
     const edges = [
       { id: 'e2', graphId: 'g', sourceNodeId: 'b', targetNodeId: 'a', created: '2025-01-03T00:00:00.000Z', undirected: true as const },
