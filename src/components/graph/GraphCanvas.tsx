@@ -66,6 +66,8 @@ export const GraphCanvas: React.FC = () => {
   const { nodes, edges, references, selectedReferenceId, selectReference, deleteReference, startEditing, editingNodeId, moveNode, addEdge, addConnectedNode, graph, updateViewport, selectNode, activeTool, addAnnotation, updateEdgeHandles, createReference, repositionReference, selectedNodeIds, replaceSelection, addToSelection, marquee, beginMarquee, updateMarquee, endMarquee, cancelMarquee, activateMarquee, interactionMode } = useGraph() as any;
   // Local React Flow controlled nodes (decoupled from store during drag for stability)
   const [flowNodes, setFlowNodes] = useState<any[]>([]);
+  // Version bump to coerce ReactFlow rerender when selection changes programmatically
+  const [selectionVersion, setSelectionVersion] = useState(0);
   // Track handle drag type so we can hide the opposite type while dragging to prevent overlap confusion
   const [activeDragType, setActiveDragType] = useState<'source' | 'target' | null>(null);
   // Initialize / merge store nodes into local state (add new, update labels). Positions updated when not currently dragging.
@@ -180,9 +182,26 @@ export const GraphCanvas: React.FC = () => {
   const onNodesChange: OnNodesChange = (changes) => {
     setFlowNodes(ns => applyNodeChanges(changes, ns));
   };
-  // Persist final position after drag
+  // Persist final position after drag (support multi-select group drag)
   const onNodeDragStop = (_: React.MouseEvent, node: Node) => {
-    moveNode(node.id, node.position.x, node.position.y);
+    if (selectedNodeIds && selectedNodeIds.length > 1) {
+      // ReactFlow already applied final positions to all selected nodes in local state (flowNodes)
+      // Persist each selected node's current position.
+      const posById: Record<string, { x: number; y: number }> = {};
+      for (const fn of flowNodes) {
+        if (selectedNodeIds.includes(fn.id)) {
+          posById[fn.id] = { x: fn.position.x, y: fn.position.y };
+        }
+      }
+      // Write positions; avoid duplicate calls if dragged node also in set.
+      Object.entries(posById).forEach(([id, p]) => {
+        moveNode(id, p.x, p.y);
+      });
+      // eslint-disable-next-line no-console
+      console.log('[multi-drag][persist]', Object.keys(posById));
+    } else {
+      moveNode(node.id, node.position.x, node.position.y);
+    }
   };
   // We no longer custom-handle edge selection
   const onEdgesChange = undefined;
@@ -318,23 +337,75 @@ export const GraphCanvas: React.FC = () => {
   }, [isPointerDown, updateMarquee, screenToFlow, marquee, activateMarquee]);
 
   const finalizeSelection = useCallback((bounds: { startX: number; startY: number; endX: number; endY: number }, additive: boolean) => {
+    // Compute bounding box and gather hit node ids
     const minX = Math.min(bounds.startX, bounds.endX);
     const maxX = Math.max(bounds.startX, bounds.endX);
     const minY = Math.min(bounds.startY, bounds.endY);
     const maxY = Math.max(bounds.startY, bounds.endY);
     const hits: string[] = [];
     for (const n of nodes) {
-      // Try to find rendered dimensions from flowNodes (more authoritative during drag)
       const rendered = flowNodes.find(fn => fn.id === n.id);
       const w = rendered?.style?.width || (n.nodeKind === 'rect' ? (n.width || 120) : (n.nodeKind === 'note' ? (n.width || 140) : 100));
       const h = rendered?.style?.height || (n.nodeKind === 'rect' ? (n.height || 60) : (n.nodeKind === 'note' ? (n.height || 90) : 38));
       const nx1 = n.x; const ny1 = n.y; const nx2 = nx1 + w; const ny2 = ny1 + h;
-      const overlap = nx1 <= maxX && nx2 >= minX && ny1 <= maxY && ny2 >= minY; // any overlap
+      const overlap = nx1 <= maxX && nx2 >= minX && ny1 <= maxY && ny2 >= minY; // any overlap counts
       if (overlap) hits.push(n.id);
     }
-    if (additive) addToSelection(hits); else replaceSelection(hits);
+    // Update global selection state first
+    if (additive) {
+      addToSelection(hits);
+    } else {
+      replaceSelection(hits);
+    }
+    // Immediately reflect selection visually in local ReactFlow node state
+    // (avoids a single-frame delay waiting for effect to rebuild flowNodes)
+    const projectedSelection = (() => {
+      if (additive) {
+        const set = new Set<string>([...selectedNodeIds, ...hits]);
+        return set;
+      }
+      return new Set<string>(hits);
+    })();
+    setFlowNodes(cur => cur.map(fn => {
+      const shouldBeSelected = projectedSelection.has(fn.id);
+      if (shouldBeSelected === !!fn.selected) return fn; // no change
+      return { ...fn, selected: shouldBeSelected };
+    }));
+    // Force ReactFlow to refresh if visual state lags by remounting (acceptable for now; can optimize later)
+    setSelectionVersion(v => v + 1);
+    // Diagnostic logging: show detailed node state for marquee selection
+    try {
+      const selectedArray = Array.from(projectedSelection.values());
+      // Build rows in a stable order (insertion order of projectedSelection)
+      const nodeState = selectedArray.map((id, index) => {
+        const fn = flowNodes.find(n => n.id === id);
+        return {
+          index,
+          id,
+          type: fn?.type ?? 'unknown',
+          x: fn?.position?.x ?? NaN,
+          y: fn?.position?.y ?? NaN,
+          selected: true // by definition of projectedSelection
+        };
+      });
+      // eslint-disable-next-line no-console
+      console.groupCollapsed('[diag][marquee-selection]');
+      // eslint-disable-next-line no-console
+      console.log('additive?', additive);
+      // eslint-disable-next-line no-console
+      console.log('hits (this gesture):', hits);
+      // eslint-disable-next-line no-console
+      console.log('projected full selection:', selectedArray);
+  // eslint-disable-next-line no-console
+  console.table(nodeState, ['index','id','type','x','y','selected']);
+  // Fallback / explicit rows (ensures visibility even if console.table collapses or is unsupported)
+  // eslint-disable-next-line no-console
+  console.log('[rows]', nodeState.map(r => `${r.index}\t${r.id}\t${r.type}\t(${r.x},${r.y})\tselected=${r.selected}`));
+      // eslint-disable-next-line no-console
+      console.groupEnd();
+    } catch { /* ignore logging errors */ }
     return hits;
-  }, [nodes, addToSelection, replaceSelection, flowNodes]);
+  }, [nodes, flowNodes, addToSelection, replaceSelection, selectedNodeIds]);
 
   const onPointerUp = useCallback((_e: React.PointerEvent) => {
   if (interactionMode !== 'select') return;
@@ -431,6 +502,7 @@ export const GraphCanvas: React.FC = () => {
   return (
     <div style={{ flex: 1, position: 'relative' }} ref={paneRef}>
   <ReactFlow
+  key={selectionVersion}
   nodes={rfNodes}
   edges={rfEdges}
   nodeTypes={nodeTypes}
@@ -446,12 +518,40 @@ export const GraphCanvas: React.FC = () => {
   panOnDrag={interactionMode === 'grab'}
   onNodeClick={(e, node) => {
           // Basic multi-select: Shift+Click adds to existing selection; no marquee involvement.
-          if ((e as any).shiftKey) {
+          const isShift = (e as any).shiftKey;
+          if (isShift) {
             addToSelection([node.id]);
           } else {
-            // Replace selection with this node only
             replaceSelection([node.id]);
           }
+          // Compute projected selection for diagnostics (since global state update batches)
+          try {
+            const projected = new Set<string>(isShift ? [...selectedNodeIds, node.id] : [node.id]);
+            const selectedArray = Array.from(projected.values());
+            const nodeState = selectedArray.map((id, index) => {
+              const fn = rfNodes.find(n => n.id === id);
+              return {
+                index,
+                id,
+                type: fn?.type ?? 'unknown',
+                x: fn?.position?.x ?? NaN,
+                y: fn?.position?.y ?? NaN,
+                selected: true
+              };
+            });
+            // eslint-disable-next-line no-console
+            console.groupCollapsed('[diag][click-selection]' + (isShift ? '[shift+click]' : '[click]'));
+            // eslint-disable-next-line no-console
+            console.log('clicked node id:', node.id);
+            // eslint-disable-next-line no-console
+            console.log('projected selection ids:', selectedArray);
+            // eslint-disable-next-line no-console
+            console.table(nodeState, ['index','id','type','x','y','selected']);
+            // eslint-disable-next-line no-console
+            console.log('[rows]', nodeState.map(r => `${r.index}\t${r.id}\t${r.type}\t(${r.x},${r.y})\tselected=${r.selected}`));
+            // eslint-disable-next-line no-console
+            console.groupEnd();
+          } catch { /* ignore logging errors */ }
         }}
         onNodeDoubleClick={(e: React.MouseEvent, node: Node) => {
           e.preventDefault();
