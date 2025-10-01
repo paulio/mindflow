@@ -231,13 +231,14 @@ export const GraphMetaPanel: React.FC = () => {
               ))}
             </div>
             <label style={{ display:'flex', flexDirection:'column', gap:4 }}>
-              <span style={{ opacity:0.8 }}>Label</span>
-              <input
-                type="text"
+              <span style={{ opacity:0.8 }}>Label (multi-line)</span>
+              <textarea
                 defaultValue={ref.label}
                 maxLength={255}
+                rows={3}
                 onBlur={(e) => updateReferenceLabel(ref.id, e.target.value)}
-                style={{ background:'#181a1f', color:'#fff', border:'1px solid #333', padding:4 }}
+                placeholder="Enter label (Shift+Enter for new line)"
+                style={{ background:'#181a1f', color:'#fff', border:'1px solid #333', padding:4, resize:'vertical', fontFamily:'inherit', fontSize:12, lineHeight:1.3 }}
               />
             </label>
             <label style={{ display:'flex', gap:6, alignItems:'center' }}>

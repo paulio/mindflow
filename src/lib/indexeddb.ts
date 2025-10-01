@@ -1,8 +1,9 @@
 import { openDB, IDBPDatabase } from 'idb';
-import { GraphRecord, NodeRecord, EdgeRecord, PersistenceSnapshot } from './types';
+import { GraphRecord, NodeRecord, EdgeRecord, PersistenceSnapshot, ReferenceConnectionRecord } from './types';
 
 const DB_NAME = 'mindflow';
-const DB_VERSION = 1;
+// Bump version to add references store (Feature 005)
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -33,6 +34,10 @@ export function initDB(): Promise<IDBPDatabase> {
         }
         if (!db.objectStoreNames.contains('settings')) {
           db.createObjectStore('settings', { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains('graphReferences')) {
+          const store = db.createObjectStore('graphReferences', { keyPath: ['graphId','id'] });
+          store.createIndex('graphId', 'graphId');
         }
       }
     });
@@ -73,6 +78,11 @@ export async function loadGraph(graphId: string): Promise<PersistenceSnapshot | 
   await db.put('graphs', graph);
   const nodes = await db.getAllFromIndex('graphNodes','graphId', graphId);
   const edges = await db.getAllFromIndex('graphEdges','graphId', graphId);
+  let references: ReferenceConnectionRecord[] = [];
+  if (db.objectStoreNames.contains('graphReferences')) {
+    references = await db.getAllFromIndex('graphReferences','graphId', graphId) as ReferenceConnectionRecord[];
+    references.sort((a,b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
+  }
   // Migration / default injection for Feature 004 rich note fields
   // We do this in-memory to avoid eager writes; persistence occurs on first save.
   for (const n of nodes as NodeRecord[]) {
@@ -94,7 +104,7 @@ export async function loadGraph(graphId: string): Promise<PersistenceSnapshot | 
   // Sort according to serialization contract
   nodes.sort((a,b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
   edges.sort((a,b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
-  return { graph, nodes, edges };
+  return { graph, nodes, edges, references };
 }
 
 export async function saveNodes(graphId: string, upserts: NodeRecord[]) {
@@ -130,9 +140,29 @@ export async function saveEdges(graphId: string, upserts: EdgeRecord[]) {
   await tx.done;
 }
 
+export async function saveReferences(graphId: string, upserts: ReferenceConnectionRecord[]) {
+  const db = await initDB();
+  if (!db.objectStoreNames.contains('graphReferences')) return; // backward compatibility (pre-upgrade)
+  const tx = db.transaction(['graphReferences','graphs'], 'readwrite');
+  const store = tx.objectStore('graphReferences');
+  for (const r of upserts) {
+    if (r.graphId !== graphId) throw new Error('graphId mismatch');
+    if (r.label && r.label.length > 255) throw new Error('label length >255');
+    await store.put(r);
+  }
+  const graph = await tx.objectStore('graphs').get(graphId) as GraphRecord | undefined;
+  if (graph) {
+    graph.lastModified = nowIso();
+    await tx.objectStore('graphs').put(graph);
+  }
+  await tx.done;
+}
+
 export async function deleteGraph(graphId: string) {
   const db = await initDB();
-  const tx = db.transaction(['graphs','graphNodes','graphEdges'], 'readwrite');
+  const stores: any[] = ['graphs','graphNodes','graphEdges'];
+  if (db.objectStoreNames.contains('graphReferences')) stores.push('graphReferences');
+  const tx = db.transaction(stores, 'readwrite');
   await tx.objectStore('graphs').delete(graphId);
   // Delete nodes
   const nodeIndex = tx.objectStore('graphNodes').index('graphId');
@@ -142,6 +172,12 @@ export async function deleteGraph(graphId: string) {
   const edgeIndex = tx.objectStore('graphEdges').index('graphId');
   for await (const cursor of iterateCursor(edgeIndex, graphId)) {
     await cursor.delete();
+  }
+  if (db.objectStoreNames.contains('graphReferences')) {
+    const refIndex = tx.objectStore('graphReferences').index('graphId');
+    for await (const cursor of iterateCursor(refIndex, graphId)) {
+      await cursor.delete();
+    }
   }
   await tx.done;
 }
@@ -197,12 +233,24 @@ export async function cloneGraph(sourceGraphId: string): Promise<GraphRecord | n
     const ne: EdgeRecord = { ...e, id: eid, graphId: newGraph.id, sourceNodeId: idMap.get(e.sourceNodeId)!, targetNodeId: idMap.get(e.targetNodeId)!, created: e.created };
     return ne;
   });
-  const tx = (await initDB()).transaction(['graphs','graphNodes','graphEdges'], 'readwrite');
+  const newReferences = (snap.references || []).map(r => {
+    const rid = generateId();
+    const nr: ReferenceConnectionRecord = { ...r, id: rid, graphId: newGraph.id, sourceNodeId: idMap.get(r.sourceNodeId)!, targetNodeId: idMap.get(r.targetNodeId)!, created: r.created, lastModified: r.lastModified };
+    return nr;
+  });
+  const db2 = await initDB();
+  const stores: any[] = ['graphs','graphNodes','graphEdges'];
+  if (db2.objectStoreNames.contains('graphReferences')) stores.push('graphReferences');
+  const tx = db2.transaction(stores, 'readwrite');
   await tx.objectStore('graphs').put(newGraph);
   const nodesStore = tx.objectStore('graphNodes');
   for (const n of newNodes) await nodesStore.put(n);
   const edgesStore = tx.objectStore('graphEdges');
   for (const e of newEdges) await edgesStore.put(e);
+  if (db2.objectStoreNames.contains('graphReferences')) {
+    const refStore = tx.objectStore('graphReferences');
+    for (const r of newReferences) await refStore.put(r);
+  }
   await tx.done;
   return newGraph;
 }

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph, persistNodeDeletion } from '../lib/indexeddb';
+import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph, persistNodeDeletion, saveReferences } from '../lib/indexeddb';
 import { createNode, createEdge } from '../lib/graph-domain';
 import { NodeRecord, EdgeRecord, GraphRecord, ReferenceConnectionRecord } from '../lib/types';
 import { events } from '../lib/events';
@@ -379,7 +379,11 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       created: now,
       lastModified: now
     };
-    setReferences(rs => [...rs, ref]);
+    setReferences(rs => {
+      const next = [...rs, ref];
+      void saveReferences(graph.id, [ref]);
+      return next;
+    });
     events.emit('reference:created', { id: ref.id, graphId: graph.id, sourceNodeId, targetNodeId, style });
     pushUndo({
       type: 'create-reference',
@@ -405,7 +409,9 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         redo: () => setReferences(inner => inner.map(rr => rr.id === id ? { ...rr, style } : rr))
       });
       events.emit('reference:styleChanged', { id, style });
-      return { ...r, style, lastModified: new Date().toISOString() };
+  const updated = { ...r, style, lastModified: new Date().toISOString() };
+  void saveReferences(r.graphId, [updated]);
+  return updated;
     }));
   }, []);
 
@@ -421,7 +427,8 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         redo: () => setReferences(inner => inner.map(rr => rr.id === id ? updated : rr))
       });
       events.emit('reference:repositioned', { id, sourceNodeId: newSourceNodeId, targetNodeId: newTargetNodeId });
-      return updated;
+  void saveReferences(r.graphId, [updated]);
+  return updated;
     }));
   }, []);
 
@@ -435,7 +442,9 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         redo: () => setReferences(inner => inner.filter(r => r.id !== id))
       });
       events.emit('reference:deleted', { id, graphId: target.graphId });
-      return rs.filter(r => r.id !== id);
+  const remaining = rs.filter(r => r.id !== id);
+  // Soft-delete: we aren't removing from IndexedDB immediately; could add a deleteReferences helper if needed.
+  return remaining;
     });
   }, []);
 
@@ -451,7 +460,9 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         redo: () => setReferences(inner => inner.map(rr => rr.id === id ? { ...rr, label: nextLabel } : rr))
       });
       events.emit('reference:labelChanged', { id, label: nextLabel });
-      return { ...r, label: nextLabel, lastModified: new Date().toISOString() };
+  const updated = { ...r, label: nextLabel, lastModified: new Date().toISOString() };
+  void saveReferences(r.graphId, [updated]);
+  return updated;
     }));
   }, []);
 
@@ -466,7 +477,9 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         redo: () => setReferences(inner => inner.map(rr => rr.id === id ? { ...rr, labelHidden: hidden } : rr))
       });
       events.emit('reference:labelVisibilityChanged', { id, hidden });
-      return { ...r, labelHidden: hidden, lastModified: new Date().toISOString() };
+  const updated = { ...r, labelHidden: hidden, lastModified: new Date().toISOString() };
+  void saveReferences(r.graphId, [updated]);
+  return updated;
     }));
   }, []);
 

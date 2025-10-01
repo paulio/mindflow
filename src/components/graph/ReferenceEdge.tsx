@@ -1,66 +1,62 @@
 import React from 'react';
-import { BaseEdge, EdgeLabelRenderer, getBezierPath } from 'reactflow';
-import { useGraph } from '../../state/graph-store';
+import { BaseEdge, getBezierPath } from 'reactflow';
 import type { EdgeProps } from 'reactflow';
 
-// Using broad EdgeProps to satisfy React Flow typing; we derive our data subset safely.
-export const ReferenceEdge: React.FC<EdgeProps<any>> = (props) => {
-  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data } = props as any;
-  const { selectedReferenceId, selectReference } = useGraph() as any;
-  const isSelected = (props as any).selected || selectedReferenceId === id;
-  const styleValue = data?.style || 'single';
-
+// Final ReferenceEdge using EdgeLabelRenderer; markers are provided by React Flow via markerStart/markerEnd props (objects -> url refs).
+export const ReferenceEdge: React.FC<EdgeProps> = (props) => {
+  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerStart, markerEnd, selected } = props as any;
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
-
-  // Use the same highlight colour (yellow) as structural parent/child edges when selected
+  const isSelected = !!selected;
   const stroke = isSelected ? '#ff0' : '#888';
   const strokeWidth = isSelected ? 3 : 2;
-
-  const renderEnd = styleValue === 'single' || styleValue === 'double';
-  const renderStart = styleValue === 'double';
-
-  if (isSelected) {
-    // eslint-disable-next-line no-console
-    console.log('[ReferenceEdge render] selected', { id, style: styleValue, label: data?.label });
-  }
-
+  const showLabel = data && !data.labelHidden && data.label;
+  const lines: string[] = showLabel ? String(data.label).split(/\r?\n/) : [];
+  const fontSize = 12;
+  const lineHeight = Math.round(fontSize * 1.2);
+  const totalHeight = lines.length * lineHeight;
+  const firstLineBaselineY = labelY - (totalHeight - lineHeight) / 2;
+  // Estimate text width per line (monospace approximation fallback). We could also store measurement in data if precision needed.
+  const approxCharWidth = fontSize * 0.62; // heuristic for typical UI font
+  const lineWidths = lines.map(l => Math.max(1, l.length * approxCharWidth));
+  const maxLineWidth = lineWidths.length ? Math.max(...lineWidths) : 0;
+  const horizontalPadding = 6;
+  const rectWidth = Math.ceil(maxLineWidth + horizontalPadding * 2);
+  const rectX = labelX - rectWidth / 2;
   return (
     <>
-      <svg style={{ position: 'absolute', overflow: 'visible' }}>
-        {renderEnd && (
-          <marker id={`ref-end-${id}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill={stroke} />
-          </marker>
-        )}
-        {renderStart && (
-          <marker id={`ref-start-${id}`} viewBox="0 0 10 10" refX="2" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-            <path d="M 10 0 L 0 5 L 10 10 z" fill={stroke} />
-          </marker>
-        )}
-      </svg>
       <BaseEdge
         id={id}
         path={edgePath}
         style={{ stroke, strokeWidth, pointerEvents: 'stroke', cursor: 'pointer' }}
-        markerEnd={renderEnd ? `url(#ref-end-${id})` : undefined}
-        markerStart={renderStart ? `url(#ref-start-${id})` : undefined}
+        markerEnd={markerEnd}
+        markerStart={markerStart}
       />
-      {!data?.labelHidden && data?.label && (
-        <EdgeLabelRenderer>
-          <div
-            style={{
-              position: 'absolute',
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-              fontSize: 12,
-              color: isSelected ? '#ff0' : '#bbb',
-              pointerEvents: 'all',
-              userSelect: 'none'
-            }}
-            onClick={(e) => { e.stopPropagation(); selectReference(id); }}
+      {showLabel && (
+        <svg style={{ position: 'absolute', overflow: 'visible', pointerEvents: 'none' }}>
+          <rect
+            x={rectX}
+            y={firstLineBaselineY - lineHeight + 4}
+            rx={4}
+            ry={4}
+            width={rectWidth}
+            height={totalHeight + 4}
+            fill="#1b1d22"
+            stroke="none"
+          />
+          <text
+            x={labelX}
+            y={firstLineBaselineY}
+            fontSize={fontSize}
+            fontFamily="inherit"
+            fill={isSelected ? '#ff0' : '#ddd'}
+            textAnchor="middle"
+            style={{ pointerEvents: 'none' }}
           >
-            {data.label}
-          </div>
-        </EdgeLabelRenderer>
+            {lines.map((ln, i) => (
+              <tspan key={i} x={labelX} dy={i === 0 ? 0 : lineHeight}>{ln === '' ? ' ' : ln}</tspan>
+            ))}
+          </text>
+        </svg>
       )}
     </>
   );

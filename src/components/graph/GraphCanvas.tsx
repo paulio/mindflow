@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, Connection, Handle, Position, OnConnectStart, OnConnectEnd, useReactFlow, applyNodeChanges, MarkerType } from 'reactflow';
 import { ThoughtEdge } from './ThoughtEdge';
+import { ReferenceEdge } from './ReferenceEdge';
 import { useGraph } from '../../state/graph-store';
 import { isPlacementValid } from '../../lib/distance';
 import { NOTE_W, NOTE_H, RECT_W, RECT_H, THOUGHT_W, THOUGHT_H } from '../../lib/annotation-constants';
@@ -54,8 +55,8 @@ const NodeTypesConst = {
   rect: (props: any) => { const { id, selected } = props; return <RectNode id={id} selected={!!selected} />; }
 };
 const EdgeTypesConst = {
-  'thought-edge': ThoughtEdge
-  // Reference connections now use the built-in default Bezier edge so we can leverage MarkerType
+  'thought-edge': ThoughtEdge,
+  'reference-edge': ReferenceEdge
 };
 
 // Reference connection arrow marker size (halved from previous 18)
@@ -131,8 +132,10 @@ export const GraphCanvas: React.FC = () => {
     }));
     const refEdges = references.map((r: any) => {
       const styleValue = r.style || 'single';
-      const renderEnd = styleValue === 'single' || styleValue === 'double';
-      const renderStart = styleValue === 'double';
+      // Visual issue: React Flow currently renders our former markerEnd at the perceived source side.
+      // To place arrow at logical target, we invert: use markerStart for single-arrow, both for double.
+      const arrowAtTarget = styleValue === 'single' || styleValue === 'double';
+      const arrowAtSource = styleValue === 'double';
       const isSelected = selectedReferenceId === r.id;
       return {
         id: r.id,
@@ -140,17 +143,10 @@ export const GraphCanvas: React.FC = () => {
         target: r.targetNodeId,
         sourceHandle: r.sourceHandleId,
         targetHandle: r.targetHandleId,
-        // use built-in default edge (Bezier) for markers
-        type: 'default',
-        data: { ref: true, style: styleValue, labelHidden: r.labelHidden },
-        markerEnd: renderEnd ? { type: MarkerType.ArrowClosed, color: isSelected ? '#ff0' : '#888', width: REFERENCE_MARKER_SIZE, height: REFERENCE_MARKER_SIZE } : undefined,
-        markerStart: renderStart ? { type: MarkerType.ArrowClosed, color: isSelected ? '#ff0' : '#888', width: REFERENCE_MARKER_SIZE, height: REFERENCE_MARKER_SIZE } : undefined,
-  label: !r.labelHidden && r.label ? r.label : undefined,
-  labelStyle: { fill: isSelected ? '#ff0' : '#ddd', fontSize: 12 },
-  labelShowBg: !!(!r.labelHidden && r.label),
-  labelBgPadding: [2, 4],
-  labelBgBorderRadius: 4,
-  labelBgStyle: { fill: '#1b1d22', stroke: 'none' },
+        type: 'reference-edge',
+        data: { ref: true, style: styleValue, labelHidden: r.labelHidden, label: r.label },
+        markerStart: arrowAtTarget ? { type: MarkerType.ArrowClosed, color: isSelected ? '#ff0' : '#888', width: REFERENCE_MARKER_SIZE, height: REFERENCE_MARKER_SIZE } : undefined,
+        markerEnd: arrowAtSource ? { type: MarkerType.ArrowClosed, color: isSelected ? '#ff0' : '#888', width: REFERENCE_MARKER_SIZE, height: REFERENCE_MARKER_SIZE } : undefined,
         style: { stroke: isSelected ? '#ff0' : '#888', strokeWidth: isSelected ? 3 : 2, cursor: 'pointer' },
         selectable: true,
         selected: isSelected
@@ -259,11 +255,20 @@ export const GraphCanvas: React.FC = () => {
   const edgeTypes = EdgeTypesConst as any;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (selectedReferenceId && (e.key === 'Delete' || e.key === 'Backspace')) {
-        e.preventDefault();
-        deleteReference(selectedReferenceId);
-        selectReference(null);
+      if (!selectedReferenceId) return;
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      // If focus is inside a text-editing context, don't treat Delete as a graph command.
+      const active = document.activeElement as HTMLElement | null;
+      if (active) {
+        const tag = active.tagName;
+        const editable = active.getAttribute('contenteditable');
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (editable && editable !== 'false')) {
+          return; // allow normal deletion within the field
+        }
       }
+      e.preventDefault();
+      deleteReference(selectedReferenceId);
+      selectReference(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
