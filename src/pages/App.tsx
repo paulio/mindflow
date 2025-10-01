@@ -9,6 +9,7 @@ import { UndoRedoBar } from '../components/ui/UndoRedoBar';
 import { SaveStatus } from '../components/ui/SaveStatus';
 import { MapLibrary } from '../components/pages/MapLibrary';
 import { Toolbar } from '../components/ui/Toolbar';
+import { InteractionModeToggle } from '../components/ui/InteractionModeToggle';
 
 const CanvasView: React.FC = () => {
   const { graph, openLibrary } = useGraph();
@@ -24,6 +25,7 @@ const CanvasView: React.FC = () => {
       </div>
       <UndoRedoBar />
   <Toolbar />
+    <InteractionModeToggle />
       <SaveStatus />
       <PerfOverlay />
     </div>
