@@ -24,26 +24,58 @@ const handleStyle: React.CSSProperties = {
   zIndex: 1
 };
 // Thought node wrapper accepts flags (via data) to hide source or target handles while dragging
+// Derive a focus ring (box-shadow) using the node's current border colour.
+// Converts #RRGGBB or #RRGGBBAA to rgba with a consistent alpha (0.35 by default) so it mimics the
+// previous --mf-selection-outline token while reflecting the override colour.
+function buildFocusRing(colour: string, alpha: number = 0.35, px: number = 3) {
+  if (!colour || typeof colour !== 'string') return 'none';
+  let hex = colour.trim();
+  if (!hex.startsWith('#')) return 'none';
+  hex = hex.slice(1);
+  if (!(hex.length === 6 || hex.length === 8)) return 'none';
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  // If original provided an alpha (length 8) we blend with desired ring alpha (multiply) for subtlety
+  let a = alpha;
+  if (hex.length === 8) {
+    const origA = parseInt(hex.slice(6, 8), 16) / 255;
+    a = +(origA * alpha).toFixed(3);
+  }
+  return `0 0 0 ${px}px rgba(${r},${g},${b},${a})`;
+}
+
 const ThoughtNodeWrapper: React.FC<NodeProps> = (props) => {
   const { id, data, selected } = props as any;
+  const raw = data?.raw;
+  const borderColour: string = raw?.currentBorderColour || raw?.originalBorderColour || 'var(--mf-node-border)';
+  const ring = selected ? buildFocusRing(borderColour) : 'none';
   const sourceOffset = -14;
   const targetOffset = DEBUG_NODES ? -30 : -14;
   const hideSource = !!data?.hideSource;
   const hideTarget = !!data?.hideTarget;
   const hiddenStyle: React.CSSProperties = { display: 'none' };
   return (
-    <div style={{ position: 'relative' }}>
+    <div
+      style={{
+        position: 'relative',
+        border: `${selected ? 'var(--mf-node-border-width-selected)' : 'var(--mf-node-border-width)'} solid ${borderColour}`,
+        borderRadius: 6,
+        boxShadow: ring,
+        transition: 'box-shadow 80ms var(--ease-standard), border-color 80ms var(--ease-standard)'
+      }}
+    >
       <ThoughtNode id={id} text={data?.label} selected={!!selected} />
       {/* Source handles */}
-  <Handle type="source" id="n" position={Position.Top} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', top: sourceOffset }} />
-  <Handle type="source" id="e" position={Position.Right} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', right: sourceOffset }} />
-  <Handle type="source" id="s" position={Position.Bottom} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', bottom: sourceOffset }} />
-  <Handle type="source" id="w" position={Position.Left} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', left: sourceOffset }} />
+      <Handle type="source" id="n" position={Position.Top} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', top: sourceOffset }} />
+      <Handle type="source" id="e" position={Position.Right} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', right: sourceOffset }} />
+      <Handle type="source" id="s" position={Position.Bottom} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', bottom: sourceOffset }} />
+      <Handle type="source" id="w" position={Position.Left} style={hideSource ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-source)', left: sourceOffset }} />
       {/* Target handles */}
-  <Handle type="target" id="n" position={Position.Top} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', top: targetOffset }} />
-  <Handle type="target" id="e" position={Position.Right} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', right: targetOffset }} />
-  <Handle type="target" id="s" position={Position.Bottom} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', bottom: targetOffset }} />
-  <Handle type="target" id="w" position={Position.Left} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', left: targetOffset }} />
+      <Handle type="target" id="n" position={Position.Top} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', top: targetOffset }} />
+      <Handle type="target" id="e" position={Position.Right} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', right: targetOffset }} />
+      <Handle type="target" id="s" position={Position.Bottom} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', bottom: targetOffset }} />
+      <Handle type="target" id="w" position={Position.Left} style={hideTarget ? hiddenStyle : { ...handleStyle, background: 'var(--mf-handle-target)', left: targetOffset }} />
     </div>
   );
 };

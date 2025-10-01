@@ -1,6 +1,7 @@
 import React from 'react';
 import { NodeResizer, useUpdateNodeInternals } from 'reactflow';
 import { useGraph } from '../../state/graph-store';
+import { resolveNodeBackground, resolveAccentColour } from '../../lib/background-precedence';
 
 const MIN_SIZE = 40;
 
@@ -33,6 +34,8 @@ export const RectNode: React.FC<{ id: string; selected?: boolean }> = ({ selecte
 		gestureStartRef.current = null;
 		requestAnimationFrame(() => updateNodeInternals(id));
 	};
+	const mappedColour = React.useMemo(() => resolveAccentColour(current, '#353b47'), [current]);
+	const background = React.useMemo(() => resolveNodeBackground(current, '#353b47'), [current]);
 	return (
 		<div
 			tabIndex={0}
@@ -40,8 +43,8 @@ export const RectNode: React.FC<{ id: string; selected?: boolean }> = ({ selecte
 			style={{
 				width,
 				height,
-				background: current.bgColor || 'var(--mf-rect-bg, #1e222b)',
-				border: selected ? '2px solid var(--mf-node-border-selected)' : '2px solid #353b47',
+				background,
+				border: selected ? `2px solid ${mappedColour}` : `2px solid ${mappedColour}`,
 				boxShadow: '0 2px 4px rgba(0,0,0,0.35)',
 				borderRadius: 6,
 				display: 'flex',
@@ -66,7 +69,7 @@ export const RectNode: React.FC<{ id: string; selected?: boolean }> = ({ selecte
 						width: 22,
 						height: 22,
 						borderRadius: '50%',
-						border: '1px solid var(--mf-node-border, #444)',
+						border: '1px solid var(--mf-node-border)',
 						background: 'var(--mf-rect-bg, #1e222b)',
 						color: 'var(--mf-rect-fg, #aaa)',
 						fontSize: 14,

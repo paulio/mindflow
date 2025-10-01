@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph, persistNodeDeletion, saveReferences } from '../lib/indexeddb';
 import { createNode, createEdge } from '../lib/graph-domain';
+import { computeInitialBorderColour, BORDER_COLOUR_PALETTE, ROOT_FALLBACK } from '../lib/node-border-palette';
 import { NodeRecord, EdgeRecord, GraphRecord, ReferenceConnectionRecord } from '../lib/types';
 import { events } from '../lib/events';
 import { pushUndo, resetUndoHistory } from '../hooks/useUndoRedo';
@@ -69,6 +70,10 @@ interface GraphContext extends GraphState {
   deleteReference(id: string): void;
   updateReferenceLabel(id: string, label: string): void;
   toggleReferenceLabelVisibility(id: string, hidden: boolean): void;
+  // Border colour override APIs (Feature 007)
+  overrideNodeBorder(nodeId: string, hex: string): void;
+  clearNodeBorderOverride(nodeId: string): void;
+  getNodeBorderInfo(nodeId: string): { colour: string; overridden: boolean; original: string } | null;
 }
 
 const Ctx = createContext<GraphContext | null>(null);
@@ -104,6 +109,16 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setGraph(g);
     // Create an initial root node so every new graph starts non-empty per requirement.
     const root = createNode({ graphId: g.id, x: 0, y: 0, text: 'New Thought' });
+    // Assign initial border colour (depth 0)
+  const mapping = computeInitialBorderColour(0, BORDER_COLOUR_PALETTE);
+  // Assign background colour from depth mapping; border always uses last palette entry
+  const lastIdx = BORDER_COLOUR_PALETTE.length - 1;
+  (root as NodeRecord).bgColor = mapping.colour;
+  (root as NodeRecord).hierDepth = 0;
+  (root as NodeRecord).originalBorderColour = BORDER_COLOUR_PALETTE[lastIdx];
+  (root as NodeRecord).currentBorderColour = BORDER_COLOUR_PALETTE[lastIdx];
+  (root as NodeRecord).borderPaletteIndex = lastIdx;
+  (root as NodeRecord).borderOverrideFlag = false;
     setNodes([root]);
     setEdges([]);
   mutationCounter.current++;
@@ -122,13 +137,49 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (snap) {
       resetUndoHistory(); // Always clear history even if reloading same graph
       setGraph(snap.graph);
-      setNodes(snap.nodes);
+      // Hydrate legacy nodes missing border fields
+      let mutated = false;
+      let levelMap: Map<string, number> = new Map();
+      try {
+        const mod = await import('../lib/hierarchy');
+        const rootId = mod.findRootNodeId(snap.nodes as any);
+        if (rootId) levelMap = mod.computeLevels(rootId, snap.nodes as any, snap.edges as any);
+      } catch { /* ignore */ }
+      const hydratedNodes = snap.nodes.map(n => {
+        if (n.originalBorderColour && n.currentBorderColour && n.borderPaletteIndex !== undefined && n.borderOverrideFlag !== undefined) return n;
+        // Need to hydrate
+        const depth = levelMap.get(n.id) ?? 0;
+        const mapping = computeInitialBorderColour(depth, BORDER_COLOUR_PALETTE);
+        const lastIdx = BORDER_COLOUR_PALETTE.length - 1;
+        const copy: NodeRecord = { ...n };
+        // Preserve existing border fields if present, else hydrate with last palette entry
+        if (!copy.originalBorderColour) {
+          copy.originalBorderColour = BORDER_COLOUR_PALETTE[lastIdx];
+        }
+        if (!copy.currentBorderColour) {
+          copy.currentBorderColour = copy.originalBorderColour;
+        }
+        if (copy.borderPaletteIndex === undefined) {
+          copy.borderPaletteIndex = lastIdx;
+        }
+        // Hydrate bgColor from depth mapping only if none set
+  if (!copy.bgColor) copy.bgColor = mapping.colour;
+  if (copy.hierDepth === undefined) copy.hierDepth = depth;
+        copy.borderOverrideFlag = copy.borderOverrideFlag ?? false;
+        mutated = true;
+        return copy;
+      });
+      setNodes(hydratedNodes);
       setEdges(snap.edges);
       setReferences(snap.references || []);
   mutationCounter.current++;
       events.emit('graph:loaded', { graphId: snap.graph.id });
       setView('canvas');
       setSelectedNodeId(null);
+      if (mutated) {
+        // Persist hydrated fields
+        void saveNodes(snap.graph.id, hydratedNodes);
+      }
     }
   }, []);
 
@@ -159,6 +210,15 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const addNode = useCallback((x: number, y: number) : NodeRecord | null => {
     if (!graph) return null;
     const n = createNode({ graphId: graph.id, x, y });
+    // Depth heuristic: unattached node => treat as depth 0 until connected
+  const mapping = computeInitialBorderColour(0, BORDER_COLOUR_PALETTE);
+  const lastIdx = BORDER_COLOUR_PALETTE.length - 1;
+  (n as NodeRecord).bgColor = mapping.colour;
+  (n as NodeRecord).hierDepth = 0; // unattached until connected
+  (n as NodeRecord).originalBorderColour = BORDER_COLOUR_PALETTE[lastIdx];
+  (n as NodeRecord).currentBorderColour = BORDER_COLOUR_PALETTE[lastIdx];
+  (n as NodeRecord).borderPaletteIndex = lastIdx;
+  (n as NodeRecord).borderOverrideFlag = false;
     setNodes(ns => [...ns, n]);
   mutationCounter.current++;
     events.emit('node:created', { graphId: graph.id, nodeId: n.id });
@@ -204,11 +264,23 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Atomic creation: if edge creation fails, node is not persisted.
   const addConnectedNode = useCallback((sourceNodeId: string, x: number, y: number, sourceHandleId?: string, targetHandleId?: string): NodeRecord | null => {
     if (!graph) return null;
+    const parentNode = nodes.find(n => n.id === sourceNodeId) as NodeRecord | undefined;
     let created: NodeRecord | null = null;
     try {
       // eslint-disable-next-line no-console
       console.debug('[graph-store] addConnectedNode invoked', { sourceNodeId, x, y, sourceHandleId, targetHandleId });
       created = createNode({ graphId: graph.id, x, y });
+      // Determine depth using current levels map
+  const parentDepth = (parentNode?.hierDepth !== undefined ? parentNode.hierDepth : (levels.get(sourceNodeId) ?? 0));
+  const childDepth = parentDepth + 1;
+  const mapping = computeInitialBorderColour(childDepth, BORDER_COLOUR_PALETTE);
+  const lastIdx = BORDER_COLOUR_PALETTE.length - 1;
+  (created as NodeRecord).bgColor = mapping.colour;
+  (created as NodeRecord).hierDepth = childDepth;
+  (created as NodeRecord).originalBorderColour = BORDER_COLOUR_PALETTE[lastIdx];
+  (created as NodeRecord).currentBorderColour = BORDER_COLOUR_PALETTE[lastIdx];
+  (created as NodeRecord).borderPaletteIndex = lastIdx;
+  (created as NodeRecord).borderOverrideFlag = false;
       const edge = createEdge({ graphId: graph.id, sourceNodeId, targetNodeId: created.id, sourceHandleId, targetHandleId });
       setNodes(ns => [...ns, created!]);
       setEdges(es => [...es, edge]);
@@ -251,7 +323,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // rollback not needed since we only mutate state after both creations succeed; if partial happened, remove.
       return null;
     }
-  }, [graph]);
+  }, [graph, nodes, levels]);
 
   // Internal helper to set node text without creating an undo entry (used by undo/redo)
   const setNodeTextRaw = useCallback((nodeId: string, nextText: string) => {
@@ -663,6 +735,12 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       width: kind === 'rect' ? 120 : (kind === 'note' ? 140 : undefined),
       height: kind === 'rect' ? 60 : (kind === 'note' ? 90 : undefined)
     };
+    // Annotation nodes get depth=0 mapping (no parent semantics yet)
+    const mapping = computeInitialBorderColour(0, BORDER_COLOUR_PALETTE);
+    rec.originalBorderColour = mapping.colour;
+    rec.currentBorderColour = mapping.colour;
+    rec.borderPaletteIndex = mapping.index;
+    rec.borderOverrideFlag = false;
     setNodes(ns => [...ns, rec]);
     events.emit('node:created', { graphId: graph.id, nodeId: rec.id });
     void saveNodes(graph.id, [rec]);
@@ -965,6 +1043,64 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, [graph, nodes, edges, levels, selectedNodeId, editingNodeId]);
 
+  // Border override actions (pure state updates + undo integration)
+  const overrideNodeBorder = useCallback((nodeId: string, hex: string) => {
+    if (!graph) return;
+    // Accept 6-digit or 8-digit hex to match palette entries (alpha allowed)
+    const HEX_RE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
+    if (!HEX_RE.test(hex)) return; // silently ignore invalid
+    setNodes(ns => ns.map(n => {
+      if (n.id !== nodeId) return n;
+      const prev = { ...n } as NodeRecord;
+      const updated: NodeRecord = { ...n, borderOverrideFlag: true, borderOverrideColour: hex, currentBorderColour: hex, lastModified: new Date().toISOString() };
+      void saveNodes(graph.id!, [updated]);
+      pushUndo({
+        type: 'border-override',
+        undo: () => {
+          setNodes(cur => cur.map(cn => cn.id === nodeId ? prev : cn));
+          void saveNodes(graph.id!, [prev]);
+        },
+        redo: () => {
+          setNodes(cur => cur.map(cn => cn.id === nodeId ? updated : cn));
+          void saveNodes(graph.id!, [updated]);
+        }
+      });
+      return updated;
+    }));
+  }, [graph]);
+
+  const clearNodeBorderOverride = useCallback((nodeId: string) => {
+    if (!graph) return;
+    setNodes(ns => ns.map(n => {
+      if (n.id !== nodeId) return n;
+      if (!n.borderOverrideFlag) return n;
+      const prev = { ...n } as NodeRecord;
+      const fallback = n.originalBorderColour || ROOT_FALLBACK;
+      const updated: NodeRecord = { ...n, borderOverrideFlag: false, borderOverrideColour: undefined, currentBorderColour: fallback, lastModified: new Date().toISOString() };
+      void saveNodes(graph.id!, [updated]);
+      pushUndo({
+        type: 'border-override-clear',
+        undo: () => {
+          setNodes(cur => cur.map(cn => cn.id === nodeId ? prev : cn));
+          void saveNodes(graph.id!, [prev]);
+        },
+        redo: () => {
+          setNodes(cur => cur.map(cn => cn.id === nodeId ? updated : cn));
+          void saveNodes(graph.id!, [updated]);
+        }
+      });
+      return updated;
+    }));
+  }, [graph]);
+
+  const getNodeBorderInfo = useCallback((nodeId: string) => {
+    const n = nodes.find(nn => nn.id === nodeId);
+    if (!n) return null;
+    const colour = n.currentBorderColour || n.originalBorderColour || ROOT_FALLBACK;
+    const original = n.originalBorderColour || colour;
+    return { colour, overridden: !!n.borderOverrideFlag, original };
+  }, [nodes]);
+
   // Hierarchy computation (BFS) when structure changes
   useEffect(() => {
     let cancelled = false;
@@ -984,7 +1120,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, references, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, selectedReferenceId, selectReference, selectedNodeIds, replaceSelection, addToSelection, toggleSelection, clearSelection, marquee, beginMarquee, updateMarquee, endMarquee, cancelMarquee, activateMarquee, interactionMode, setInteractionMode: setInteractionModeCb, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles, updateNoteFormatting, resetNoteFormatting, createReference, updateReferenceStyle, repositionReference, deleteReference, updateReferenceLabel, toggleReferenceLabelVisibility }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, references, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, selectedReferenceId, selectReference, selectedNodeIds, replaceSelection, addToSelection, toggleSelection, clearSelection, marquee, beginMarquee, updateMarquee, endMarquee, cancelMarquee, activateMarquee, interactionMode, setInteractionMode: setInteractionModeCb, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles, updateNoteFormatting, resetNoteFormatting, createReference, updateReferenceStyle, repositionReference, deleteReference, updateReferenceLabel, toggleReferenceLabelVisibility, overrideNodeBorder, clearNodeBorderOverride, getNodeBorderInfo }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { NodeResizer, useUpdateNodeInternals } from 'reactflow';
 import { useGraph } from '../../state/graph-store';
+import { resolveNodeBackground, resolveAccentColour } from '../../lib/background-precedence';
 
 interface Props { id: string; text: string; selected?: boolean; }
 
@@ -67,7 +68,8 @@ export const NoteNode: React.FC<Props> = ({ id, text, selected }) => {
 		else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
 	}
 	// Derived colors / styles
-	const baseBg = current.bgColor || 'var(--mf-note-bg, #2d323f)';
+	const mappedColour = React.useMemo(() => resolveAccentColour(current, '#3b4252'), [current]);
+	const baseBg = resolveNodeBackground(current, mappedColour || 'var(--mf-note-bg, #2d323f)');
 	const textColor = current.textColor || 'var(--mf-note-fg, #fff)';
 	const effectiveBg = hideShapeWhenUnselected && !selected ? 'transparent' : applyOpacity(baseBg, backgroundOpacity / 100);
 	const borderVisible = !hideShapeWhenUnselected || selected;
@@ -115,6 +117,7 @@ export const NoteNode: React.FC<Props> = ({ id, text, selected }) => {
 	})();
 
 	const truncated = overflowMode === 'truncate' && isOverflowing;
+// mappedColour resolved above
 
 	return (
 		<div
@@ -125,9 +128,10 @@ export const NoteNode: React.FC<Props> = ({ id, text, selected }) => {
 			style={{
 				width,
 				height,
-				background: effectiveBg,
+				background: effectiveBg || mappedColour,
 				color: textColor,
-				border: borderVisible ? (selected ? '2px solid var(--mf-node-border-selected)' : '1px solid #3b4252') : '1px solid transparent',
+				// Use override/default border colour consistently; selection emphasis can come from boxShadow.
+				border: borderVisible ? (selected ? `2px solid ${mappedColour}` : `1px solid ${mappedColour}`) : '1px solid transparent',
 				boxShadow: selected ? '0 0 0 1px var(--mf-node-border-selected)' : '0 1px 2px rgba(0,0,0,0.45)',
 				borderRadius: 6,
 				minWidth: MIN_W,
