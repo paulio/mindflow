@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, Connection, Handle, Position, OnConnectStart, OnConnectEnd, useReactFlow, applyNodeChanges, MarkerType } from 'reactflow';
 import { ThoughtEdge } from './ThoughtEdge';
 import { ReferenceEdge } from './ReferenceEdge';
@@ -63,7 +63,7 @@ const EdgeTypesConst = {
 const REFERENCE_MARKER_SIZE = 9;
 
 export const GraphCanvas: React.FC = () => {
-  const { nodes, edges, references, selectedReferenceId, selectReference, deleteReference, startEditing, editingNodeId, moveNode, addEdge, addConnectedNode, graph, updateViewport, selectNode, activeTool, addAnnotation, updateEdgeHandles, createReference, repositionReference } = useGraph() as any;
+  const { nodes, edges, references, selectedReferenceId, selectReference, deleteReference, startEditing, editingNodeId, moveNode, addEdge, addConnectedNode, graph, updateViewport, selectNode, activeTool, addAnnotation, updateEdgeHandles, createReference, repositionReference, selectedNodeIds, replaceSelection, addToSelection, marquee, beginMarquee, updateMarquee, endMarquee, cancelMarquee, activateMarquee, interactionMode } = useGraph() as any;
   // Local React Flow controlled nodes (decoupled from store during drag for stability)
   const [flowNodes, setFlowNodes] = useState<any[]>([]);
   // Track handle drag type so we can hide the opposite type while dragging to prevent overlap confusion
@@ -84,6 +84,7 @@ export const GraphCanvas: React.FC = () => {
   // When dragging a TARGET endpoint, we want only SOURCE ports available -> hideTarget true in that case.
   // When dragging a SOURCE endpoint, we want only TARGET ports available -> hideSource true in that case.
   const commonData = { hideSource: activeDragType === 'source', hideTarget: activeDragType === 'target' };
+        const isSelected = selectedNodeIds.includes(n.id);
         if (byId.has(n.id)) {
           const existing = byId.get(n.id)!;
           return {
@@ -91,7 +92,8 @@ export const GraphCanvas: React.FC = () => {
             position: { x: n.x, y: n.y },
             style: { ...(existing.style || {}), ...sizeStyle, zIndex },
             data: { label: n.text || 'New Thought', raw: n, ...commonData },
-            type: baseType
+            type: baseType,
+            selected: isSelected
           };
         }
         return {
@@ -100,11 +102,12 @@ export const GraphCanvas: React.FC = () => {
             position: { x: n.x, y: n.y },
           style: { ...sizeStyle, zIndex },
           data: { label: n.text || (baseType === 'note' ? 'Note' : 'New Thought'), raw: n, ...commonData },
-          tabIndex: 0
+          tabIndex: 0,
+          selected: isSelected
         };
       });
     });
-  }, [nodes, activeDragType]);
+  }, [nodes, activeDragType, selectedNodeIds]);
   const rfInstance = useReactFlow();
   useEffect(() => {
     if (graph?.viewport) {
@@ -273,9 +276,161 @@ export const GraphCanvas: React.FC = () => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedReferenceId, deleteReference, selectReference]);
+  // ===== Marquee Selection Logic =====
+  const paneRef = useRef<HTMLDivElement | null>(null);
+  const MARQUEE_THRESHOLD = 8; // px in screen space
+  const [isPointerDown, setIsPointerDown] = useState(false);
+  const dragOrigin = useRef<{ x: number; y: number; additive: boolean } | null>(null);
+
+  const screenToFlow = useCallback((pt: { x: number; y: number }) => rfInstance.screenToFlowPosition(pt), [rfInstance]);
+  const flowToScreen = useCallback((pt: { x: number; y: number }) => {
+    const vp = rfInstance.getViewport();
+    // React Flow transform: screen = flow * zoom + translate
+    return { x: pt.x * vp.zoom + vp.x, y: pt.y * vp.zoom + vp.y };
+  }, [rfInstance]);
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+  if (interactionMode !== 'select') return; // only in selection mode
+  if (!(e.target as HTMLElement).classList.contains('react-flow__pane')) return;
+    // Don't start if a tool action is active (will create annotation) or editing text
+    const active = document.activeElement as HTMLElement | null;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.getAttribute('contenteditable') === 'true')) return;
+    const additive = e.shiftKey;
+    dragOrigin.current = { x: e.clientX, y: e.clientY, additive };
+    const flow = screenToFlow({ x: e.clientX, y: e.clientY });
+    beginMarquee(flow.x, flow.y, additive);
+    setIsPointerDown(true);
+  }, [beginMarquee, screenToFlow]);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+  if (interactionMode !== 'select') return;
+  if (!isPointerDown || !dragOrigin.current) return;
+    const origin = dragOrigin.current;
+    const dx = e.clientX - origin.x;
+    const dy = e.clientY - origin.y;
+    const dist = Math.max(Math.abs(dx), Math.abs(dy));
+    const flow = screenToFlow({ x: e.clientX, y: e.clientY });
+    updateMarquee(flow.x, flow.y);
+    // Promote to active if threshold exceeded
+    if (dist >= MARQUEE_THRESHOLD && marquee && marquee.active === false) {
+      activateMarquee();
+    }
+  }, [isPointerDown, updateMarquee, screenToFlow, marquee, activateMarquee]);
+
+  const finalizeSelection = useCallback((bounds: { startX: number; startY: number; endX: number; endY: number }, additive: boolean) => {
+    const minX = Math.min(bounds.startX, bounds.endX);
+    const maxX = Math.max(bounds.startX, bounds.endX);
+    const minY = Math.min(bounds.startY, bounds.endY);
+    const maxY = Math.max(bounds.startY, bounds.endY);
+    const hits: string[] = [];
+    for (const n of nodes) {
+      // Try to find rendered dimensions from flowNodes (more authoritative during drag)
+      const rendered = flowNodes.find(fn => fn.id === n.id);
+      const w = rendered?.style?.width || (n.nodeKind === 'rect' ? (n.width || 120) : (n.nodeKind === 'note' ? (n.width || 140) : 100));
+      const h = rendered?.style?.height || (n.nodeKind === 'rect' ? (n.height || 60) : (n.nodeKind === 'note' ? (n.height || 90) : 38));
+      const nx1 = n.x; const ny1 = n.y; const nx2 = nx1 + w; const ny2 = ny1 + h;
+      const overlap = nx1 <= maxX && nx2 >= minX && ny1 <= maxY && ny2 >= minY; // any overlap
+      if (overlap) hits.push(n.id);
+    }
+    if (additive) addToSelection(hits); else replaceSelection(hits);
+    return hits;
+  }, [nodes, addToSelection, replaceSelection, flowNodes]);
+
+  const onPointerUp = useCallback((_e: React.PointerEvent) => {
+  if (interactionMode !== 'select') return;
+  if (!isPointerDown) return;
+    setIsPointerDown(false);
+    let result = endMarquee();
+    // If marquee never activated (threshold not crossed) but pointer moved enough, synthesize one so we still capture.
+    if (!result && marquee && marquee.active === false) {
+      const dxMove = Math.abs(marquee.currentX - marquee.startX);
+      const dyMove = Math.abs(marquee.currentY - marquee.startY);
+      const maxDim = Math.max(dxMove, dyMove);
+      if (maxDim >= MARQUEE_THRESHOLD) {
+        result = { startX: marquee.startX, startY: marquee.startY, endX: marquee.currentX, endY: marquee.currentY, additive: marquee.additive };
+      }
+    }
+    if (!result) { dragOrigin.current = null; return; }
+    const dx = Math.abs(result.endX - result.startX);
+    const dy = Math.abs(result.endY - result.startY);
+    if (Math.max(dx, dy) < MARQUEE_THRESHOLD) { dragOrigin.current = null; return; }
+    const hits = finalizeSelection(result, !!result.additive);
+    if (hits.length) {
+      // eslint-disable-next-line no-console
+      console.log('[marquee] captured nodes:', hits);
+    } else {
+      // eslint-disable-next-line no-console
+      console.log('[marquee] none captured');
+    }
+    dragOrigin.current = null;
+  }, [isPointerDown, endMarquee, finalizeSelection]);
+
+  useEffect(() => {
+    const pane = paneRef.current?.querySelector('.react-flow__pane');
+    if (!pane) return;
+    const handlePointerDown = (e: PointerEvent) => onPointerDown(e as any);
+    const handlePointerMove = (e: PointerEvent) => onPointerMove(e as any);
+    const handlePointerUp = (e: PointerEvent) => onPointerUp(e as any);
+  (pane as any).addEventListener('pointerdown', handlePointerDown as any);
+  (window as any).addEventListener('pointermove', handlePointerMove as any);
+  (window as any).addEventListener('pointerup', handlePointerUp as any);
+    return () => {
+      (pane as any).removeEventListener('pointerdown', handlePointerDown as any);
+      (window as any).removeEventListener('pointermove', handlePointerMove as any);
+      (window as any).removeEventListener('pointerup', handlePointerUp as any);
+    };
+  }, [onPointerDown, onPointerMove, onPointerUp]);
+
+  // Marquee rectangle(s): show faint pre-threshold preview, solid after activation
+  let marqueeRect: { x: number; y: number; w: number; h: number; pre: boolean } | null = null;
+  if (interactionMode === 'select' && marquee) {
+    const minX = Math.min(marquee.startX, marquee.currentX);
+    const minY = Math.min(marquee.startY, marquee.currentY);
+    const wFlow = Math.abs(marquee.currentX - marquee.startX);
+    const hFlow = Math.abs(marquee.currentY - marquee.startY);
+    const tl = flowToScreen({ x: minX, y: minY });
+    const br = flowToScreen({ x: minX + wFlow, y: minY + hFlow });
+    const w = br.x - tl.x;
+    const h = br.y - tl.y;
+    const maxDim = Math.max(Math.abs(w), Math.abs(h));
+    if (maxDim >= 2) { // avoid zero flicker
+      const active = marquee.active && maxDim >= MARQUEE_THRESHOLD;
+      marqueeRect = { x: tl.x, y: tl.y, w: Math.abs(w), h: Math.abs(h), pre: !active };
+    }
+  }
+
+  // ===== Group Selection Bounding Box (Option A) =====
+  // Render a unified bounding rectangle when multiple nodes are selected (and no active marquee in progress).
+  // Purely visual; future enhancements (resize/group drag handles) can hook into this container.
+  let groupRect: { x: number; y: number; w: number; h: number } | null = null;
+  if (!marqueeRect && selectedNodeIds && selectedNodeIds.length > 1) {
+    // Gather rendered flow nodes for selected ids to obtain current widths/heights.
+    const selectedFlowNodes = flowNodes.filter(n => selectedNodeIds.includes(n.id));
+    if (selectedFlowNodes.length > 1) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const fn of selectedFlowNodes) {
+        const baseW = (fn.style && (fn.style as any).width) || (fn.type === 'rect' ? (fn.data?.raw?.width || RECT_W) : (fn.type === 'note' ? (fn.data?.raw?.width || NOTE_W) : THOUGHT_W));
+        const baseH = (fn.style && (fn.style as any).height) || (fn.type === 'rect' ? (fn.data?.raw?.height || RECT_H) : (fn.type === 'note' ? (fn.data?.raw?.height || NOTE_H) : THOUGHT_H));
+        const x1 = fn.position.x;
+        const y1 = fn.position.y;
+        const x2 = x1 + baseW;
+        const y2 = y1 + baseH;
+        if (x1 < minX) minX = x1;
+        if (y1 < minY) minY = y1;
+        if (x2 > maxX) maxX = x2;
+        if (y2 > maxY) maxY = y2;
+      }
+      if (isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
+        const tl = flowToScreen({ x: minX, y: minY });
+        const br = flowToScreen({ x: maxX, y: maxY });
+        groupRect = { x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y };
+      }
+    }
+  }
+
   return (
-    <div style={{ flex: 1 }}>
-    <ReactFlow
+    <div style={{ flex: 1, position: 'relative' }} ref={paneRef}>
+  <ReactFlow
   nodes={rfNodes}
   edges={rfEdges}
   nodeTypes={nodeTypes}
@@ -287,8 +442,17 @@ export const GraphCanvas: React.FC = () => {
         zoomOnDoubleClick={false}
         zoomOnScroll={false}
         zoomOnPinch={false}
-        panOnScroll={false}
-  onNodeClick={(_, node) => { selectNode(node.id); }}
+  panOnScroll={interactionMode === 'grab'}
+  panOnDrag={interactionMode === 'grab'}
+  onNodeClick={(e, node) => {
+          // Basic multi-select: Shift+Click adds to existing selection; no marquee involvement.
+          if ((e as any).shiftKey) {
+            addToSelection([node.id]);
+          } else {
+            // Replace selection with this node only
+            replaceSelection([node.id]);
+          }
+        }}
         onNodeDoubleClick={(e: React.MouseEvent, node: Node) => {
           e.preventDefault();
           e.stopPropagation();
@@ -352,6 +516,44 @@ export const GraphCanvas: React.FC = () => {
         <Background />
         <Controls />
       </ReactFlow>
+      {groupRect && (
+        <div
+          aria-label={selectedNodeIds.length + ' nodes selected'}
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            transform: `translate(${groupRect.x}px, ${groupRect.y}px)`,
+            width: groupRect.w,
+            height: groupRect.h,
+            background: 'rgba(79,157,255,0.04)', // subtle unified tint
+            outline: '1px dashed rgba(79,157,255,0.7)',
+            borderRadius: 8,
+            boxShadow: '0 0 0 1px rgba(0,0,0,0.35), 0 0 0 3px rgba(79,157,255,0.15)',
+            pointerEvents: 'none',
+            zIndex: 40,
+            transition: 'opacity 120ms var(--ease-standard)',
+            opacity: 1
+          }}
+        />
+      )}
+      {marqueeRect && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            transform: `translate(${marqueeRect.x}px, ${marqueeRect.y}px)`,
+            width: marqueeRect.w,
+            height: marqueeRect.h,
+            background: marqueeRect.pre ? 'rgba(255,255,0,0.03)' : 'rgba(255,255,0,0.10)',
+            outline: marqueeRect.pre ? '1px dashed rgba(255,255,0,0.35)' : '1px solid #ff0',
+            pointerEvents: 'none',
+            zIndex: 50,
+            boxShadow: marqueeRect.pre ? 'none' : '0 0 0 1px rgba(0,0,0,0.4)'
+          }}
+        />
+      )}
     </div>
   );
 };
