@@ -72,22 +72,41 @@ export const NoteNode: React.FC<Props> = ({ id, text, selected }) => {
 	const effectiveBg = hideShapeWhenUnselected && !selected ? 'transparent' : applyOpacity(baseBg, backgroundOpacity / 100);
 	const borderVisible = !hideShapeWhenUnselected || selected;
 	const contentRef = React.useRef<HTMLSpanElement|null>(null);
+	const containerRef = React.useRef<HTMLDivElement|null>(null);
+	const [isOverflowing, setIsOverflowing] = React.useState(false);
 
-	// Auto-resize vertically if mode auto-resize and editing
+	// Text auto-fit (shrink/grow font within bounds) instead of container growth when overflowMode='auto-resize'
+	const MIN_FONT = 8;
 	React.useLayoutEffect(() => {
-		if (overflowMode === 'auto-resize' && editing && contentRef.current && !showHandles) {
-			const el = contentRef.current.parentElement as HTMLElement;
-			if (el) {
-				const maxH = current.maxHeight || 280;
-				requestAnimationFrame(() => {
-					const scrollH = el.scrollHeight;
-					if (scrollH > el.clientHeight && scrollH < maxH) {
-						resizeRectangleEphemeral(id, width, Math.min(maxH, scrollH), current.x, current.y);
-					}
-				});
+		const container = containerRef.current;
+		const content = contentRef.current;
+		if (!container || !content) return;
+		// Reset content font size to base before measuring
+		content.style.fontSize = fontSize + 'px';
+		const availableH = container.clientHeight; // fixed container height
+		let currentSize = fontSize;
+		if (overflowMode === 'auto-resize') {
+			// Shrink phase
+			let safety = 100; // guard against infinite loop
+			while (safety-- > 0 && currentSize > MIN_FONT && content.scrollHeight > availableH + 1) {
+				currentSize -= 1;
+				content.style.fontSize = currentSize + 'px';
+			}
+			// Grow phase (if there is room and user deleted text) up to original font size
+			while (safety-- > 0 && currentSize < fontSize && content.scrollHeight <= availableH - 4) {
+				currentSize += 1;
+				content.style.fontSize = currentSize + 'px';
+				if (content.scrollHeight > availableH + 1) { // overshoot, step back
+					currentSize -= 1;
+					content.style.fontSize = currentSize + 'px';
+					break;
+				}
 			}
 		}
-	}, [overflowMode, editing, width, current.maxHeight, resizeRectangleEphemeral, id, current.x, current.y, showHandles]);
+		// Overflow detection (true if still overflowing even at min font or non-auto modes)
+		const overflow = content.scrollHeight > availableH + 1;
+		if (overflow !== isOverflowing) setIsOverflowing(overflow);
+	}, [text, draft, overflowMode, width, height, fontSize, italic, fontWeight, isOverflowing]);
 
 	const overflowStyle: React.CSSProperties = (() => {
 		if (overflowMode === 'scroll') return { overflow: 'auto' };
@@ -95,8 +114,11 @@ export const NoteNode: React.FC<Props> = ({ id, text, selected }) => {
 		return { overflow: 'hidden' }; // auto-resize attempts to grow, else hidden
 	})();
 
+	const truncated = overflowMode === 'truncate' && isOverflowing;
+
 	return (
 		<div
+			ref={containerRef}
 			tabIndex={0}
 			aria-label={text ? `note: ${text.split('\n')[0].slice(0,40)}` : 'note'}
 			onDoubleClick={(e) => { e.stopPropagation(); if (!editing) startEditing(id); }}
@@ -147,12 +169,40 @@ export const NoteNode: React.FC<Props> = ({ id, text, selected }) => {
 					}}
 				/>
 			) : (
-					<span ref={contentRef} style={{ whiteSpace: 'pre-wrap', width: '100%', textAlign: hAlign, background: highlight ? 'rgba(255,235,59,0.35)' : 'transparent', position:'relative', boxShadow: highlight ? '0 0 0 1px rgba(255,235,59,0.6) inset' : 'none', borderRadius: 2 }}>
-						{text || 'Note'}
-						{overflowMode === 'truncate' && (
-							<span aria-hidden="true" style={{ position:'absolute', left:0, top:0, right:0, bottom:0, pointerEvents:'none', background:'linear-gradient(to bottom, rgba(0,0,0,0) 60%, rgba(0,0,0,0.55) 100%)', opacity:0.7 }} />
-						)}
-					</span>
+					<>
+						<span
+							ref={contentRef}
+							title={truncated ? text : undefined}
+							style={{
+								whiteSpace: 'pre-wrap',
+								width: '100%',
+								textAlign: hAlign,
+								background: highlight ? 'rgba(255,235,59,0.35)' : 'transparent',
+								position:'relative',
+								boxShadow: highlight ? '0 0 0 1px rgba(255,235,59,0.6) inset' : 'none',
+								borderRadius: 2
+							}}
+						>
+							{text || 'Note'}
+						</span>
+							{truncated && (
+								<div aria-hidden="true" style={{ position:'absolute', left:0, right:0, bottom:0, height:20, pointerEvents:'none', display:'flex', alignItems:'flex-end', justifyContent:'flex-end', paddingRight:2 }}>
+									<div style={{ position:'absolute', inset:0, background:`linear-gradient(to bottom, rgba(0,0,0,0) 0%, ${effectiveBg === 'transparent' ? 'rgba(0,0,0,0.72)' : effectiveBg} 100%)` }} />
+									<span style={{
+										background: 'linear-gradient(135deg, rgba(0,0,0,0.75), rgba(0,0,0,0.55))',
+										color: '#fff',
+										padding: '1px 8px 3px',
+										fontWeight: 700,
+										fontSize: Math.min(fontSize + 2, 24),
+										lineHeight: '1',
+										borderRadius: 6,
+										boxShadow: '0 0 0 1px rgba(255,255,255,0.15), 0 2px 4px rgba(0,0,0,0.45)',
+										letterSpacing: 1,
+										textShadow: '0 1px 2px rgba(0,0,0,0.8)'
+									}}>…</span>
+								</div>
+							)}
+					</>
 			)}
 									{selected && !editing && (
 				<button
