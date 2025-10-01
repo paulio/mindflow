@@ -1,12 +1,12 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph, persistNodeDeletion } from '../lib/indexeddb';
 import { createNode, createEdge } from '../lib/graph-domain';
-import { NodeRecord, EdgeRecord, GraphRecord } from '../lib/types';
+import { NodeRecord, EdgeRecord, GraphRecord, ReferenceConnectionRecord } from '../lib/types';
 import { events } from '../lib/events';
 import { pushUndo, resetUndoHistory } from '../hooks/useUndoRedo';
 
 type ViewMode = 'library' | 'canvas';
-interface GraphState { graph: GraphRecord | null; nodes: NodeRecord[]; edges: EdgeRecord[]; graphs: GraphRecord[]; view: ViewMode; }
+interface GraphState { graph: GraphRecord | null; nodes: NodeRecord[]; edges: EdgeRecord[]; graphs: GraphRecord[]; view: ViewMode; references: ReferenceConnectionRecord[]; }
 
 interface GraphContext extends GraphState {
   newGraph(): Promise<void>;
@@ -34,6 +34,8 @@ interface GraphContext extends GraphState {
   pendingChanges: boolean; // coarse indicator for unsaved changes (future: integrate with autosave scheduler)
   selectedNodeId: string | null;
   selectNode(id: string | null): void;
+  selectedReferenceId: string | null;
+  selectReference(id: string | null): void;
   levels: Map<string, number>;
   // Toolbar feature state
   activeTool: 'note' | 'rect' | null;
@@ -46,6 +48,13 @@ interface GraphContext extends GraphState {
   // Rich note formatting updates
   updateNoteFormatting(nodeId: string, patch: Partial<Pick<NodeRecord,'fontFamily'|'fontSize'|'fontWeight'|'italic'|'underline'|'highlight'|'backgroundOpacity'|'overflowMode'|'hideShapeWhenUnselected'|'maxHeight'>>): void;
   resetNoteFormatting(nodeId: string): void;
+  // Reference APIs
+  createReference(sourceNodeId: string, targetNodeId: string, style?: 'single'|'double'|'none', sourceHandleId?: string, targetHandleId?: string): void;
+  updateReferenceStyle(id: string, style: 'single'|'double'|'none'): void;
+  repositionReference(id: string, newSourceNodeId: string, newTargetNodeId: string, newSourceHandleId?: string, newTargetHandleId?: string): void;
+  deleteReference(id: string): void;
+  updateReferenceLabel(id: string, label: string): void;
+  toggleReferenceLabelVisibility(id: string, hidden: boolean): void;
 }
 
 const Ctx = createContext<GraphContext | null>(null);
@@ -55,10 +64,12 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [edges, setEdges] = useState<EdgeRecord[]>([]);
   const [graphs, setGraphs] = useState<GraphRecord[]>([]);
+  const [references, setReferences] = useState<ReferenceConnectionRecord[]>([]);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>('library');
   const [pendingChanges, setPendingChanges] = useState<boolean>(false); // placeholder (would toggle on edits & clear on autosave success)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(null);
   const [levels, setLevels] = useState<Map<string, number>>(new Map());
   const [activeTool, setActiveTool] = useState<'note' | 'rect' | null>(null);
   const mutationCounter = useRef(0);
@@ -88,6 +99,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setGraph(snap.graph);
       setNodes(snap.nodes);
       setEdges(snap.edges);
+      setReferences(snap.references || []);
   mutationCounter.current++;
       events.emit('graph:loaded', { graphId: snap.graph.id });
       setView('canvas');
@@ -341,22 +353,138 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   }, [graph, persistNode]);
 
+  // ===== Reference Connections =====
+  const duplicateRefExists = useCallback((sourceNodeId: string, targetNodeId: string, style: string) => {
+    return references.some(r => r.sourceNodeId === sourceNodeId && r.targetNodeId === targetNodeId && r.style === style);
+  }, [references]);
+
+  const createReference = useCallback((sourceNodeId: string, targetNodeId: string, style: 'single'|'double'|'none' = 'single', sourceHandleId?: string, targetHandleId?: string) => {
+    if (!graph) return;
+    if (sourceNodeId === targetNodeId) return;
+    if (duplicateRefExists(sourceNodeId, targetNodeId, style)) {
+      events.emit('reference:duplicateBlocked', { sourceNodeId, targetNodeId, style });
+      return;
+    }
+    const now = new Date().toISOString();
+    const ref: ReferenceConnectionRecord = {
+      id: crypto.randomUUID ? crypto.randomUUID() : 'ref-' + Math.random().toString(16).slice(2),
+      graphId: graph.id,
+      sourceNodeId,
+      targetNodeId,
+      sourceHandleId,
+      targetHandleId,
+      style,
+      label: '',
+      labelHidden: false,
+      created: now,
+      lastModified: now
+    };
+    setReferences(rs => [...rs, ref]);
+    events.emit('reference:created', { id: ref.id, graphId: graph.id, sourceNodeId, targetNodeId, style });
+    pushUndo({
+      type: 'create-reference',
+      undo: () => {
+        setReferences(rs => rs.filter(r => r.id !== ref.id));
+        events.emit('reference:deleted', { id: ref.id, graphId: graph.id });
+      },
+      redo: () => {
+        setReferences(rs => rs.some(r => r.id === ref.id) ? rs : [...rs, ref]);
+        events.emit('reference:created', { id: ref.id, graphId: graph.id, sourceNodeId, targetNodeId, style });
+      }
+    });
+  }, [graph, duplicateRefExists]);
+
+  const updateReferenceStyle = useCallback((id: string, style: 'single'|'double'|'none') => {
+    setReferences(rs => rs.map(r => {
+      if (r.id !== id) return r;
+      if (r.style === style) return r;
+      const prev = r.style;
+      pushUndo({
+        type: 'reference-style',
+        undo: () => setReferences(inner => inner.map(rr => rr.id === id ? { ...rr, style: prev } : rr)),
+        redo: () => setReferences(inner => inner.map(rr => rr.id === id ? { ...rr, style } : rr))
+      });
+      events.emit('reference:styleChanged', { id, style });
+      return { ...r, style, lastModified: new Date().toISOString() };
+    }));
+  }, []);
+
+  const repositionReference = useCallback((id: string, newSourceNodeId: string, newTargetNodeId: string, newSourceHandleId?: string, newTargetHandleId?: string) => {
+    if (newSourceNodeId === newTargetNodeId) return;
+    setReferences(rs => rs.map(r => {
+      if (r.id !== id) return r;
+      const prev = { src: r.sourceNodeId, tgt: r.targetNodeId, sh: r.sourceHandleId, th: r.targetHandleId };
+      const updated: ReferenceConnectionRecord = { ...r, sourceNodeId: newSourceNodeId, targetNodeId: newTargetNodeId, sourceHandleId: newSourceHandleId, targetHandleId: newTargetHandleId, lastModified: new Date().toISOString() };
+      pushUndo({
+        type: 'reference-reposition',
+        undo: () => setReferences(inner => inner.map(rr => rr.id === id ? { ...rr, sourceNodeId: prev.src, targetNodeId: prev.tgt, sourceHandleId: prev.sh, targetHandleId: prev.th } : rr)),
+        redo: () => setReferences(inner => inner.map(rr => rr.id === id ? updated : rr))
+      });
+      events.emit('reference:repositioned', { id, sourceNodeId: newSourceNodeId, targetNodeId: newTargetNodeId });
+      return updated;
+    }));
+  }, []);
+
+  const deleteReference = useCallback((id: string) => {
+    setReferences(rs => {
+      const target = rs.find(r => r.id === id);
+      if (!target) return rs;
+      pushUndo({
+        type: 'delete-reference',
+        undo: () => setReferences(inner => inner.some(r => r.id === id) ? inner : [...inner, target]),
+        redo: () => setReferences(inner => inner.filter(r => r.id !== id))
+      });
+      events.emit('reference:deleted', { id, graphId: target.graphId });
+      return rs.filter(r => r.id !== id);
+    });
+  }, []);
+
+  const updateReferenceLabel = useCallback((id: string, label: string) => {
+    setReferences(rs => rs.map(r => {
+      if (r.id !== id) return r;
+      const prev = r.label || '';
+      const nextLabel = label.slice(0,255);
+      if (prev === nextLabel) return r;
+      pushUndo({
+        type: 'reference-label',
+        undo: () => setReferences(inner => inner.map(rr => rr.id === id ? { ...rr, label: prev } : rr)),
+        redo: () => setReferences(inner => inner.map(rr => rr.id === id ? { ...rr, label: nextLabel } : rr))
+      });
+      events.emit('reference:labelChanged', { id, label: nextLabel });
+      return { ...r, label: nextLabel, lastModified: new Date().toISOString() };
+    }));
+  }, []);
+
+  const toggleReferenceLabelVisibility = useCallback((id: string, hidden: boolean) => {
+    setReferences(rs => rs.map(r => {
+      if (r.id !== id) return r;
+      if (!!r.labelHidden === hidden) return r;
+      const prev = !!r.labelHidden;
+      pushUndo({
+        type: 'reference-label-visibility',
+        undo: () => setReferences(inner => inner.map(rr => rr.id === id ? { ...rr, labelHidden: prev } : rr)),
+        redo: () => setReferences(inner => inner.map(rr => rr.id === id ? { ...rr, labelHidden: hidden } : rr))
+      });
+      events.emit('reference:labelVisibilityChanged', { id, hidden });
+      return { ...r, labelHidden: hidden, lastModified: new Date().toISOString() };
+    }));
+  }, []);
+
+  // MISSING CORE FUNCTIONS RE-INSERTED
   const moveNode = useCallback((nodeId: string, x: number, y: number) => {
     if (!graph) return;
-    // Capture previous position
     const prev = nodes.find(n => n.id === nodeId);
     if (!prev) return;
     const prevX = prev.x; const prevY = prev.y;
     const nextX = Math.round(x); const nextY = Math.round(y);
-    if (prevX === nextX && prevY === nextY) return; // no-op
-    // Apply new position
-  let movedLocal: NodeRecord | null = null;
+    if (prevX === nextX && prevY === nextY) return;
+    let movedLocal: NodeRecord | null = null;
     setNodes(ns => ns.map(n => {
       if (n.id === nodeId) { movedLocal = { ...n, x: nextX, y: nextY, lastModified: new Date().toISOString() }; return movedLocal; }
       return n;
     }));
     if (movedLocal) {
-      const moved = movedLocal as NodeRecord; // stable reference with explicit type
+      const moved = movedLocal as NodeRecord;
       void saveNodes(graph.id, [moved]);
       events.emit('node:moved', { graphId: graph.id, nodeId, x: moved.x, y: moved.y });
       pushUndo({
@@ -378,227 +506,8 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateViewport = useCallback((x: number, y: number, zoom: number) => {
     if (!graph) return;
     setGraph(g => g ? { ...g, viewport: { x, y, zoom } } : g);
-    // persist asynchronously (non-blocking)
     updateGraphMeta(graph.id, { viewport: { x, y, zoom } }).catch(()=>{});
   }, [graph]);
-
-  const cloneCurrent = useCallback(async () => {
-    if (!graph) return;
-    const g = await cloneGraph(graph.id);
-    if (!g) return;
-    // Load newly cloned graph
-    const snap = await loadGraph(g.id);
-    if (snap) {
-      resetUndoHistory();
-      setGraph(snap.graph);
-      setNodes(snap.nodes);
-      setEdges(snap.edges);
-      mutationCounter.current++;
-      await refreshList();
-      setView('canvas');
-      setSelectedNodeId(null); // Start with no selection (or could auto-select root in future)
-    }
-  }, [graph]);
-
-  // FR-043: Delete node with hierarchical re-parenting of its children.
-  const deleteNode = useCallback((nodeId: string) => {
-    if (!graph) return;
-    // root cannot be deleted (FR-043a)
-    const rootId = (() => {
-      let earliest: NodeRecord | null = null;
-      for (const n of nodes) { if (!earliest || n.created < earliest.created) earliest = n; }
-      return earliest?.id || null;
-    })();
-    if (nodeId === rootId) return; // no-op for root
-    const node = nodes.find(n => n.id === nodeId);
-    if (!node) return;
-    // Build adjacency for neighbor detection (undirected)
-    const adjacency = new Map<string, Set<string>>();
-    function link(a: string, b: string) { (adjacency.get(a) || adjacency.set(a, new Set()).get(a)!).add(b); }
-    for (const e of edges) { link(e.sourceNodeId, e.targetNodeId); link(e.targetNodeId, e.sourceNodeId); }
-    const level = levels; // already cached map from provider effect
-    const nodeLevel = level.get(nodeId);
-    // If no levels known or node has no level, fallback: simple deletion without re-parent (safety)
-    if (nodeLevel === undefined) {
-      // Fallback simple delete + persist (no re-parent). Capture edges removed for undo.
-      const nodeSnapshot = { ...node } as NodeRecord;
-      const removedEdges: EdgeRecord[] = [];
-      setNodes(ns => ns.filter(n => n.id !== nodeId));
-      setEdges(es => {
-        const kept = es.filter(e => {
-          const rem = e.sourceNodeId === nodeId || e.targetNodeId === nodeId;
-          if (rem) removedEdges.push(e as EdgeRecord);
-          return !rem;
-        });
-        return kept;
-      });
-      mutationCounter.current++;
-      if (selectedNodeId === nodeId) setSelectedNodeId(null);
-      if (editingNodeId === nodeId) setEditingNodeId(null);
-      events.emit('node:deleted', { graphId: graph.id, nodeId });
-      void persistNodeDeletion(graph.id, nodeId, removedEdges.map(e=>e.id), []);
-      // Push undo entry
-      pushUndo({
-        type: 'delete',
-        undo: () => {
-          // Restore node & removed edges
-          setNodes(ns => [...ns, nodeSnapshot]);
-          setEdges(es => [...es, ...removedEdges]);
-          // Persist restores
-          void saveNodes(graph.id!, [nodeSnapshot]);
-          void saveEdges(graph.id!, removedEdges);
-          events.emit('node:created', { graphId: graph.id!, nodeId: nodeSnapshot.id });
-          removedEdges.forEach(e => events.emit('edge:created', { graphId: graph.id!, edgeId: e.id }));
-        },
-        redo: () => {
-          setNodes(ns => ns.filter(n => n.id !== nodeSnapshot.id));
-          setEdges(es => es.filter(e => !removedEdges.some(r => r.id === e.id)));
-          void persistNodeDeletion(graph.id!, nodeSnapshot.id, removedEdges.map(e=>e.id), []);
-          events.emit('node:deleted', { graphId: graph.id!, nodeId: nodeSnapshot.id });
-        }
-      });
-      return;
-    }
-    // Determine parent candidates: neighbors with smaller level
-    const neighbors = Array.from(adjacency.get(nodeId) || []);
-    const parentCandidates = neighbors.filter(n => (level.get(n) ?? Infinity) < nodeLevel);
-    // Choose deterministic parent: smallest level then earliest created timestamp
-    let parentId: string | null = null;
-    if (parentCandidates.length) {
-      parentId = parentCandidates.reduce((best, cur) => {
-        if (!best) return cur;
-        const lb = level.get(best)!; const lc = level.get(cur)!;
-        if (lc < lb) return cur;
-        if (lc > lb) return best;
-        // tie by created timestamp
-        const nb = nodes.find(n => n.id === best)!; const nc = nodes.find(n => n.id === cur)!;
-        if (nc.created < nb.created) return cur;
-        return best;
-      }, '' as string);
-    }
-    if (!parentId) {
-      // treat like simple delete (same as above path) but with known levels.
-      const nodeSnapshot = { ...node } as NodeRecord;
-      const removedEdges: EdgeRecord[] = [];
-      setNodes(ns => ns.filter(n => n.id !== nodeId));
-      setEdges(es => {
-        const kept = es.filter(e => {
-          const rem = e.sourceNodeId === nodeId || e.targetNodeId === nodeId;
-          if (rem) removedEdges.push(e as EdgeRecord);
-          return !rem;
-        });
-        return kept;
-      });
-      mutationCounter.current++;
-      if (selectedNodeId === nodeId) setSelectedNodeId(null);
-      if (editingNodeId === nodeId) setEditingNodeId(null);
-      events.emit('node:deleted', { graphId: graph.id, nodeId });
-      void persistNodeDeletion(graph.id, nodeId, removedEdges.map(e=>e.id), []);
-      pushUndo({
-        type: 'delete',
-        undo: () => {
-          setNodes(ns => [...ns, nodeSnapshot]);
-            setEdges(es => [...es, ...removedEdges]);
-            void saveNodes(graph.id!, [nodeSnapshot]);
-            void saveEdges(graph.id!, removedEdges);
-            events.emit('node:created', { graphId: graph.id!, nodeId: nodeSnapshot.id });
-            removedEdges.forEach(e => events.emit('edge:created', { graphId: graph.id!, edgeId: e.id }));
-        },
-        redo: () => {
-          setNodes(ns => ns.filter(n => n.id !== nodeSnapshot.id));
-          setEdges(es => es.filter(e => !removedEdges.some(r => r.id === e.id)));
-          void persistNodeDeletion(graph.id!, nodeSnapshot.id, removedEdges.map(e=>e.id), []);
-          events.emit('node:deleted', { graphId: graph.id!, nodeId: nodeSnapshot.id });
-        }
-      });
-      return;
-    }
-    // Children: neighbors with level = nodeLevel + 1
-    const childIds = neighbors.filter(n => level.get(n) === nodeLevel + 1);
-    // Prepare diff
-    const incidentEdgeIds = new Set<string>();
-    const remainingEdges: EdgeRecord[] = [];
-    for (const e of edges) {
-      if (e.sourceNodeId === nodeId || e.targetNodeId === nodeId) { incidentEdgeIds.add(e.id); continue; }
-      remainingEdges.push(e);
-    }
-    const newEdges: EdgeRecord[] = [];
-    // Helper to check existing connectivity (undirected)
-    function hasEdge(a: string, b: string) {
-      return remainingEdges.some(e => (e.sourceNodeId === a && e.targetNodeId === b) || (e.sourceNodeId === b && e.targetNodeId === a));
-    }
-    for (const childId of childIds) {
-      if (childId === parentId) continue; // safety
-      if (hasEdge(parentId, childId)) continue; // duplicate prevention (FR-043b)
-      try {
-        // FR-043d handle assignment based on nearest cardinal direction
-        const parentNode = nodes.find(n => n.id === parentId);
-        const childNode = nodes.find(n => n.id === childId);
-        let sourceHandleId: string | undefined; let targetHandleId: string | undefined;
-        if (parentNode && childNode) {
-          const APPROX_W = 100; const APPROX_H = 38; // heuristic sizing consistent with creation constants
-            const px = parentNode.x + APPROX_W / 2; const py = parentNode.y + APPROX_H / 2;
-            const cx = childNode.x + APPROX_W / 2; const cy = childNode.y + APPROX_H / 2;
-            const dx = cx - px; const dy = cy - py;
-            const adx = Math.abs(dx); const ady = Math.abs(dy);
-            if (ady >= adx) { // vertical dominance or tie => vertical
-              if (dy < 0) { sourceHandleId = 'n'; targetHandleId = 's'; }
-              else { sourceHandleId = 's'; targetHandleId = 'n'; }
-            } else {
-              if (dx > 0) { sourceHandleId = 'e'; targetHandleId = 'w'; }
-              else { sourceHandleId = 'w'; targetHandleId = 'e'; }
-            }
-        }
-        const e = createEdge({ graphId: graph.id, sourceNodeId: parentId, targetNodeId: childId, sourceHandleId, targetHandleId });
-        newEdges.push(e);
-      } catch { /* ignore */ }
-    }
-    // Commit atomically
-  const nodeSnapshot = { ...node } as NodeRecord;
-  const removedEdgesFull = edges.filter(e => e.sourceNodeId === nodeId || e.targetNodeId === nodeId);
-  setNodes(ns => ns.filter(n => n.id !== nodeId));
-  setEdges(es => [...remainingEdges, ...newEdges]);
-    mutationCounter.current++;
-  if (selectedNodeId === nodeId) setSelectedNodeId(null);
-  if (editingNodeId === nodeId) setEditingNodeId(null);
-    // Ordered events: node:deleted then edge:created sorted by child id (FR-043c)
-    events.emit('node:deleted', { graphId: graph.id, nodeId });
-    const sortedNew = [...newEdges].sort((a, b) => a.targetNodeId.localeCompare(b.targetNodeId));
-    for (const e of sortedNew) { events.emit('edge:created', { graphId: graph.id, edgeId: e.id }); }
-    // Persistence: remove node + incident edges, insert new edges
-    const removedEdgeIds = Array.from(incidentEdgeIds);
-    void persistNodeDeletion(graph.id, nodeId, removedEdgeIds, newEdges);
-    // Push undo entry capturing node + removed edges + new (re-parent) edges
-    pushUndo({
-      type: 'delete',
-      undo: () => {
-        // restore node
-        setNodes(ns => [...ns, nodeSnapshot]);
-        // remove re-parent edges & add back original ones
-        setEdges(es => {
-          const filtered = es.filter(e => !newEdges.some(ne => ne.id === e.id));
-          return [...filtered, ...removedEdgesFull];
-        });
-        void saveNodes(graph.id!, [nodeSnapshot]);
-        void saveEdges(graph.id!, removedEdgesFull);
-        events.emit('node:created', { graphId: graph.id!, nodeId: nodeSnapshot.id });
-        removedEdgesFull.forEach(e => events.emit('edge:created', { graphId: graph.id!, edgeId: e.id }));
-      },
-      redo: () => {
-        // reapply deletion with re-parent edges
-        setNodes(ns => ns.filter(n => n.id !== nodeSnapshot.id));
-        setEdges(es => {
-          const woOriginal = es.filter(e => !removedEdgesFull.some(r => r.id === e.id));
-          // ensure newEdges present
-          const missing = newEdges.filter(ne => !woOriginal.some(e => e.id === ne.id));
-          return [...woOriginal, ...missing];
-        });
-        void persistNodeDeletion(graph.id!, nodeSnapshot.id, removedEdgesFull.map(e=>e.id), newEdges);
-        events.emit('node:deleted', { graphId: graph.id!, nodeId: nodeSnapshot.id });
-        newEdges.forEach(e => events.emit('edge:created', { graphId: graph.id!, edgeId: e.id }));
-      }
-    });
-  }, [graph, nodes, edges, levels, selectedNodeId, editingNodeId]);
 
   const setNodePositionEphemeral = useCallback((nodeId: string, x: number, y: number) => {
     if (!graph) return;
@@ -607,18 +516,28 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const startEditing = useCallback((nodeId: string) => { setEditingNodeId(nodeId); }, []);
   const stopEditing = useCallback(() => { setEditingNodeId(null); }, []);
-  const selectNode = useCallback((id: string | null) => { setSelectedNodeId(id); }, []);
+  const selectNode = useCallback((id: string | null) => { setSelectedReferenceId(null); setSelectedNodeId(id); }, []);
+  const selectReference = useCallback((id: string | null) => { setSelectedNodeId(null); setSelectedReferenceId(id); }, []);
 
-  // Toolbar actions
   const activateTool = useCallback((tool: 'note' | 'rect') => {
     setActiveTool(prev => {
-      if (prev === tool) return prev; // handled by toggleTool
+      if (prev === tool) return prev;
       events.emit('toolbar:toolActivated', { tool });
       return tool;
     });
   }, []);
 
-  // Annotation creation (Feature 003)
+  const toggleTool = useCallback((tool: 'note' | 'rect') => {
+    setActiveTool(prev => {
+      if (prev === tool) {
+        events.emit('toolbar:toolDeactivated', { tool });
+        return null;
+      }
+      events.emit('toolbar:toolActivated', { tool });
+      return tool;
+    });
+  }, []);
+
   const addAnnotation = useCallback((kind: 'note' | 'rect', x: number, y: number) => {
     if (!graph) return null;
     const now = new Date().toISOString();
@@ -656,16 +575,15 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return rec;
   }, [graph]);
 
-  // Rectangle resizing commit (FR-041..FR-045)
   const resizeRectangle = useCallback((nodeId: string, width: number, height: number, gesture?: { prevWidth: number; prevHeight: number; prevX: number; prevY: number; newX?: number; newY?: number }) => {
     if (!graph) return;
     setNodes(ns => ns.map(n => {
-  if (n.id === nodeId && (n.nodeKind === 'rect' || n.nodeKind === 'note')) {
+      if (n.id === nodeId && (n.nodeKind === 'rect' || n.nodeKind === 'note')) {
         const w = Math.max(40, Math.round(width));
         const h = Math.max(40, Math.round(height));
         const nextX = gesture?.newX !== undefined ? Math.round(gesture.newX) : n.x;
         const nextY = gesture?.newY !== undefined ? Math.round(gesture.newY) : n.y;
-        if (n.width === w && n.height === h && n.x === nextX && n.y === nextY) return n; // no-op
+        if (n.width === w && n.height === h && n.x === nextX && n.y === nextY) return n;
         const updated: NodeRecord = { ...n, width: w, height: h, x: nextX, y: nextY, lastModified: new Date().toISOString() };
         void saveNodes(graph.id!, [updated]);
         events.emit('node:resized', { nodeId, width: w, height: h, prevWidth: n.width ?? 120, prevHeight: n.height ?? 60 });
@@ -674,7 +592,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const prevX = gesture?.prevX ?? n.x;
         const prevY = gesture?.prevY ?? n.y;
         if (!gesture || (prevW === w && prevH === h && prevX === nextX && prevY === nextY)) {
-          return updated; // not a gesture commit OR no net change
+          return updated;
         }
         pushUndo({
           type: 'resize-rect',
@@ -695,14 +613,12 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   }, [graph]);
 
-  // Ephemeral live rectangle resize (no persistence, no undo push) used during drag before mouseup
   const resizeRectangleEphemeral = useCallback((nodeId: string, width: number, height: number, x: number, y: number) => {
     if (!graph) return;
     setNodes(ns => ns.map(n => {
-  if (n.id === nodeId && (n.nodeKind === 'rect' || n.nodeKind === 'note')) {
+      if (n.id === nodeId && (n.nodeKind === 'rect' || n.nodeKind === 'note')) {
         const w = Math.max(40, Math.round(width));
         const h = Math.max(40, Math.round(height));
-        // Do not mutate lastModified here; this is transient visual feedback
         if (n.width === w && n.height === h && n.x === Math.round(x) && n.y === Math.round(y)) return n;
         return { ...n, width: w, height: h, x: Math.round(x), y: Math.round(y) } as NodeRecord;
       }
@@ -710,19 +626,10 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   }, [graph]);
 
-  // Minimal edge handle update (no undo yet) to support interactive endpoint dragging
   const updateEdgeHandles = useCallback((edgeId: string, sourceHandleId?: string | null, targetHandleId?: string | null) => {
     if (!graph) return;
     setEdges(es => es.map(e => {
       if (e.id !== edgeId) return e;
-      // eslint-disable-next-line no-console
-      console.debug('[updateEdgeHandles]', {
-        edgeId,
-        prevSource: e.sourceHandleId,
-        prevTarget: e.targetHandleId,
-        nextSource: sourceHandleId,
-        nextTarget: targetHandleId
-      });
       const next: EdgeRecord = {
         ...e,
         sourceHandleId: sourceHandleId === undefined ? e.sourceHandleId : sourceHandleId || undefined,
@@ -734,7 +641,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   }, [graph]);
 
-  // Update note alignment (horizontal / vertical) with undo (notes only)
   const updateNoteAlignment = useCallback((nodeId: string, h?: 'left'|'center'|'right', v?: 'top'|'middle'|'bottom') => {
     if (!graph) return;
     setNodes(ns => ns.map(n => {
@@ -763,16 +669,192 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   }, [graph]);
 
-  const toggleTool = useCallback((tool: 'note' | 'rect') => {
-    setActiveTool(prev => {
-      if (prev === tool) {
-        events.emit('toolbar:toolDeactivated', { tool });
-        return null;
+  const cloneCurrent = useCallback(async () => {
+    if (!graph) return;
+    const g = await cloneGraph(graph.id);
+    if (!g) return;
+    const snap = await loadGraph(g.id);
+    if (snap) {
+      resetUndoHistory();
+      setGraph(snap.graph);
+      setNodes(snap.nodes);
+      setEdges(snap.edges);
+      setReferences(snap.references || []);
+      mutationCounter.current++;
+      await refreshList();
+      setView('canvas');
+      setSelectedNodeId(null);
+    }
+  }, [graph]);
+
+  const deleteNode = useCallback((nodeId: string) => {
+    if (!graph) return;
+    const rootId = (() => {
+      let earliest: NodeRecord | null = null;
+      for (const n of nodes) { if (!earliest || n.created < earliest.created) earliest = n; }
+      return earliest?.id || null;
+    })();
+    if (nodeId === rootId) return;
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const adjacency = new Map<string, Set<string>>();
+    function link(a: string, b: string) { (adjacency.get(a) || adjacency.set(a, new Set()).get(a)!).add(b); }
+    for (const e of edges) { link(e.sourceNodeId, e.targetNodeId); link(e.targetNodeId, e.sourceNodeId); }
+    const level = levels;
+    const nodeLevel = level.get(nodeId);
+    if (nodeLevel === undefined) {
+      const nodeSnapshot = { ...node } as NodeRecord;
+      const removedEdges: EdgeRecord[] = [];
+      setNodes(ns => ns.filter(n => n.id !== nodeId));
+      setEdges(es => {
+        const kept = es.filter(e => {
+          const rem = e.sourceNodeId === nodeId || e.targetNodeId === nodeId;
+          if (rem) removedEdges.push(e as EdgeRecord);
+          return !rem;
+        });
+        return kept;
+      });
+      mutationCounter.current++;
+      if (selectedNodeId === nodeId) setSelectedNodeId(null);
+      if (editingNodeId === nodeId) setEditingNodeId(null);
+      events.emit('node:deleted', { graphId: graph.id, nodeId });
+      void persistNodeDeletion(graph.id, nodeId, removedEdges.map(e=>e.id), []);
+      pushUndo({
+        type: 'delete',
+        undo: () => {
+          setNodes(ns => [...ns, nodeSnapshot]);
+          setEdges(es => [...es, ...removedEdges]);
+          void saveNodes(graph.id!, [nodeSnapshot]);
+          void saveEdges(graph.id!, removedEdges);
+          events.emit('node:created', { graphId: graph.id!, nodeId: nodeSnapshot.id });
+          removedEdges.forEach(e => events.emit('edge:created', { graphId: graph.id!, edgeId: e.id }));
+        },
+        redo: () => {
+          setNodes(ns => ns.filter(n => n.id !== nodeSnapshot.id));
+          setEdges(es => es.filter(e => !removedEdges.some(r => r.id === e.id)));
+          void persistNodeDeletion(graph.id!, nodeSnapshot.id, removedEdges.map(e=>e.id), []);
+          events.emit('node:deleted', { graphId: graph.id!, nodeId: nodeSnapshot.id });
+        }
+      });
+      return;
+    }
+    const neighbors = Array.from(adjacency.get(nodeId) || []);
+    const parentCandidates = neighbors.filter(n => (level.get(n) ?? Infinity) < nodeLevel);
+    let parentId: string | null = null;
+    if (parentCandidates.length) {
+      parentId = parentCandidates.reduce((best, cur) => {
+        if (!best) return cur;
+        const lb = level.get(best)!; const lc = level.get(cur)!;
+        if (lc < lb) return cur;
+        if (lc > lb) return best;
+        const nb = nodes.find(n => n.id === best)!; const nc = nodes.find(n => n.id === cur)!;
+        if (nc.created < nb.created) return cur;
+        return best;
+      }, '' as string);
+    }
+    if (!parentId) {
+      const nodeSnapshot = { ...node } as NodeRecord;
+      const removedEdges: EdgeRecord[] = [];
+      setNodes(ns => ns.filter(n => n.id !== nodeId));
+      setEdges(es => {
+        const kept = es.filter(e => {
+          const rem = e.sourceNodeId === nodeId || e.targetNodeId === nodeId;
+          if (rem) removedEdges.push(e as EdgeRecord);
+          return !rem;
+        });
+        return kept;
+      });
+      mutationCounter.current++;
+      if (selectedNodeId === nodeId) setSelectedNodeId(null);
+      if (editingNodeId === nodeId) setEditingNodeId(null);
+      events.emit('node:deleted', { graphId: graph.id, nodeId });
+      void persistNodeDeletion(graph.id, nodeId, removedEdges.map(e=>e.id), []);
+      pushUndo({
+        type: 'delete',
+        undo: () => {
+          setNodes(ns => [...ns, nodeSnapshot]);
+          setEdges(es => [...es, ...removedEdges]);
+          void saveNodes(graph.id!, [nodeSnapshot]);
+          void saveEdges(graph.id!, removedEdges);
+          events.emit('node:created', { graphId: graph.id!, nodeId: nodeSnapshot.id });
+          removedEdges.forEach(e => events.emit('edge:created', { graphId: graph.id!, edgeId: e.id }));
+        },
+        redo: () => {
+          setNodes(ns => ns.filter(n => n.id !== nodeSnapshot.id));
+          setEdges(es => es.filter(e => !removedEdges.some(r => r.id === e.id)));
+          void persistNodeDeletion(graph.id!, nodeSnapshot.id, removedEdges.map(e=>e.id), []);
+          events.emit('node:deleted', { graphId: graph.id!, nodeId: nodeSnapshot.id });
+        }
+      });
+      return;
+    }
+    const childIds = neighbors.filter(n => level.get(n) === nodeLevel + 1);
+    const incidentEdgeIds = new Set<string>();
+    const remainingEdges: EdgeRecord[] = [];
+    for (const e of edges) {
+      if (e.sourceNodeId === nodeId || e.targetNodeId === nodeId) { incidentEdgeIds.add(e.id); continue; }
+      remainingEdges.push(e);
+    }
+    const newEdges: EdgeRecord[] = [];
+    function hasEdge(a: string, b: string) { return remainingEdges.some(e => (e.sourceNodeId === a && e.targetNodeId === b) || (e.sourceNodeId === b && e.targetNodeId === a)); }
+    for (const childId of childIds) {
+      if (childId === parentId) continue;
+      if (hasEdge(parentId, childId)) continue;
+      try {
+        const parentNode = nodes.find(n => n.id === parentId);
+        const childNode = nodes.find(n => n.id === childId);
+        let sourceHandleId: string | undefined; let targetHandleId: string | undefined;
+        if (parentNode && childNode) {
+          const APPROX_W = 100; const APPROX_H = 38;
+          const px = parentNode.x + APPROX_W / 2; const py = parentNode.y + APPROX_H / 2;
+          const cx = childNode.x + APPROX_W / 2; const cy = childNode.y + APPROX_H / 2;
+          const dx = cx - px; const dy = cy - py;
+          const adx = Math.abs(dx); const ady = Math.abs(dy);
+          if (ady >= adx) { if (dy < 0) { sourceHandleId = 'n'; targetHandleId = 's'; } else { sourceHandleId = 's'; targetHandleId = 'n'; } }
+          else { if (dx > 0) { sourceHandleId = 'e'; targetHandleId = 'w'; } else { sourceHandleId = 'w'; targetHandleId = 'e'; } }
+        }
+        const e = createEdge({ graphId: graph.id, sourceNodeId: parentId, targetNodeId: childId, sourceHandleId, targetHandleId });
+        newEdges.push(e);
+      } catch { /* ignore */ }
+    }
+    const nodeSnapshot = { ...node } as NodeRecord;
+    const removedEdgesFull = edges.filter(e => e.sourceNodeId === nodeId || e.targetNodeId === nodeId);
+    setNodes(ns => ns.filter(n => n.id !== nodeId));
+    setEdges(es => [...remainingEdges, ...newEdges]);
+    mutationCounter.current++;
+    if (selectedNodeId === nodeId) setSelectedNodeId(null);
+    if (editingNodeId === nodeId) setEditingNodeId(null);
+    events.emit('node:deleted', { graphId: graph.id, nodeId });
+    const sortedNew = [...newEdges].sort((a, b) => a.targetNodeId.localeCompare(b.targetNodeId));
+    for (const e of sortedNew) { events.emit('edge:created', { graphId: graph.id, edgeId: e.id }); }
+    const removedEdgeIds = Array.from(incidentEdgeIds);
+    void persistNodeDeletion(graph.id, nodeId, removedEdgeIds, newEdges);
+    pushUndo({
+      type: 'delete',
+      undo: () => {
+        setNodes(ns => [...ns, nodeSnapshot]);
+        setEdges(es => {
+          const filtered = es.filter(e => !newEdges.some(ne => ne.id === e.id));
+          return [...filtered, ...removedEdgesFull];
+        });
+        void saveNodes(graph.id!, [nodeSnapshot]);
+        void saveEdges(graph.id!, removedEdgesFull);
+        events.emit('node:created', { graphId: graph.id!, nodeId: nodeSnapshot.id });
+        removedEdgesFull.forEach(e => events.emit('edge:created', { graphId: graph.id!, edgeId: e.id }));
+      },
+      redo: () => {
+        setNodes(ns => ns.filter(n => n.id !== nodeSnapshot.id));
+        setEdges(es => {
+          const woOriginal = es.filter(e => !removedEdgesFull.some(r => r.id === e.id));
+          const missing = newEdges.filter(ne => !woOriginal.some(e => e.id === ne.id));
+          return [...woOriginal, ...missing];
+        });
+        void persistNodeDeletion(graph.id!, nodeSnapshot.id, removedEdgesFull.map(e=>e.id), newEdges);
+        events.emit('node:deleted', { graphId: graph.id!, nodeId: nodeSnapshot.id });
+        newEdges.forEach(e => events.emit('edge:created', { graphId: graph.id!, edgeId: e.id }));
       }
-      events.emit('toolbar:toolActivated', { tool });
-      return tool;
     });
-  }, []);
+  }, [graph, nodes, edges, levels, selectedNodeId, editingNodeId]);
 
   // Hierarchy computation (BFS) when structure changes
   useEffect(() => {
@@ -793,7 +875,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles, updateNoteFormatting, resetNoteFormatting }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, references, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, selectedReferenceId, selectReference, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles, updateNoteFormatting, resetNoteFormatting, createReference, updateReferenceStyle, repositionReference, deleteReference, updateReferenceLabel, toggleReferenceLabelVisibility }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

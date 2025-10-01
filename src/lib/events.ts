@@ -22,7 +22,15 @@ export type EventName =
   | 'node:zOrderChanged'
   | 'node:resized'
   | 'note:formatChanged'
-  | 'note:formatReset';
+  | 'note:formatReset'
+  // Reference connection feature events
+  | 'reference:created'
+  | 'reference:deleted'
+  | 'reference:styleChanged'
+  | 'reference:repositioned'
+  | 'reference:duplicateBlocked'
+  | 'reference:labelChanged'
+  | 'reference:labelVisibilityChanged';
 
 export interface EventPayloads {
   'graph:created': { graphId: string };
@@ -47,6 +55,13 @@ export interface EventPayloads {
   'node:resized': { nodeId: string; width: number; height: number; prevWidth: number; prevHeight: number };
   'note:formatChanged': { nodeId: string; patch: Record<string, unknown> };
   'note:formatReset': { nodeId: string };
+  'reference:created': { id: string; graphId: string; sourceNodeId: string; targetNodeId: string; style: string };
+  'reference:deleted': { id: string; graphId: string };
+  'reference:styleChanged': { id: string; style: string };
+  'reference:repositioned': { id: string; sourceNodeId: string; targetNodeId: string };
+  'reference:duplicateBlocked': { sourceNodeId: string; targetNodeId: string; style: string };
+  'reference:labelChanged': { id: string; label: string };
+  'reference:labelVisibilityChanged': { id: string; hidden: boolean };
 }
 
 type Handler<E extends EventName> = (payload: EventPayloads[E]) => void;

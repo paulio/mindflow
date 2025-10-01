@@ -5,7 +5,7 @@ import { useTheme } from '../../state/theme-store';
 import { NoteFormatPanel } from './NoteFormatPanel';
 
 export const GraphMetaPanel: React.FC = () => {
-  const { graph, nodes, edges, renameGraph, selectedNodeId, selectNode, levels, removeGraph, cloneCurrent, updateNodeColors, updateNodeZOrder, updateNoteAlignment } = useGraph() as any;
+  const { graph, nodes, edges, renameGraph, selectedNodeId, selectNode, levels, removeGraph, cloneCurrent, updateNodeColors, updateNodeZOrder, updateNoteAlignment, references, selectedReferenceId, selectReference, updateReferenceStyle, updateReferenceLabel, toggleReferenceLabelVisibility, deleteReference, } = useGraph() as any;
   const { theme, setTheme, available } = useTheme();
   const [name, setName] = useState(graph?.name ?? '');
   if (!graph) return null;
@@ -203,6 +203,58 @@ export const GraphMetaPanel: React.FC = () => {
                 <NoteFormatPanel />
               </div>
             )}
+          </div>
+        );
+      })()}
+      {!selectedNodeId && selectedReferenceId && (() => {
+        const ref = references.find((r: any) => r.id === selectedReferenceId);
+        if (!ref) return null;
+        return (
+          <div style={{ fontSize:12, marginTop:6, display:'flex', flexDirection:'column', gap:8 }}>
+            <strong>Reference Connection</strong>
+            <div style={{ display:'flex', gap:6 }}>
+              {(['single','double','none'] as const).map(styleOpt => (
+                <button
+                  key={styleOpt}
+                  type="button"
+                  onClick={() => updateReferenceStyle(ref.id, styleOpt)}
+                  disabled={ref.style === styleOpt}
+                  style={{
+                    background: ref.style === styleOpt ? '#3a3f4b' : '#222',
+                    color:'#fff',
+                    border:'1px solid #444',
+                    padding:'4px 8px',
+                    cursor: ref.style === styleOpt ? 'default' : 'pointer',
+                    fontSize:12
+                  }}
+                >{styleOpt === 'single' ? '→' : styleOpt === 'double' ? '↔' : '––'}</button>
+              ))}
+            </div>
+            <label style={{ display:'flex', flexDirection:'column', gap:4 }}>
+              <span style={{ opacity:0.8 }}>Label</span>
+              <input
+                type="text"
+                defaultValue={ref.label}
+                maxLength={255}
+                onBlur={(e) => updateReferenceLabel(ref.id, e.target.value)}
+                style={{ background:'#181a1f', color:'#fff', border:'1px solid #333', padding:4 }}
+              />
+            </label>
+            <label style={{ display:'flex', gap:6, alignItems:'center' }}>
+              <input
+                type="checkbox"
+                checked={!!ref.labelHidden}
+                onChange={(e) => toggleReferenceLabelVisibility(ref.id, e.target.checked)}
+              />
+              <span>Hide label</span>
+            </label>
+            <div>
+              <button
+                type="button"
+                onClick={() => { deleteReference(ref.id); selectReference(null); }}
+                style={{ background:'#2a2a30', color:'#fff', padding:'4px 8px', border:'1px solid #444', cursor:'pointer', fontSize:12 }}
+              >Delete Reference</button>
+            </div>
           </div>
         );
       })()}

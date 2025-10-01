@@ -51,10 +51,26 @@ export interface EdgeRecord {
   undirected: true;
 }
 
+// Reference connections (Feature 005) are distinct logical edges with directional semantics and style/label metadata.
+export interface ReferenceConnectionRecord {
+  id: string;
+  graphId: string;
+  sourceNodeId: string; // cannot equal targetNodeId (self disallowed)
+  targetNodeId: string;
+  sourceHandleId?: string; // optional port metadata (reuse existing port ids)
+  targetHandleId?: string;
+  style: 'single' | 'double' | 'none'; // arrow end-cap style
+  label?: string; // optional short text (<=255 in UI enforcement)
+  labelHidden?: boolean; // true => label not rendered
+  created: string;
+  lastModified: string;
+}
+
 export interface PersistenceSnapshot {
   graph: GraphRecord;
   nodes: NodeRecord[];
   edges: EdgeRecord[];
+  references?: ReferenceConnectionRecord[]; // optional for backward compatibility
 }
 
 export type IDBStores = 'graphs' | 'graphNodes' | 'graphEdges' | 'settings';
