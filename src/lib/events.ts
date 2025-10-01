@@ -20,7 +20,9 @@ export type EventName =
   | 'toolbar:toolDeactivated'
   | 'node:colorChanged'
   | 'node:zOrderChanged'
-  | 'node:resized';
+  | 'node:resized'
+  | 'note:formatChanged'
+  | 'note:formatReset';
 
 export interface EventPayloads {
   'graph:created': { graphId: string };
@@ -43,6 +45,8 @@ export interface EventPayloads {
   'node:colorChanged': { nodeId: string; bgColor?: string; textColor?: string };
   'node:zOrderChanged': { nodeId: string; frontFlag: boolean };
   'node:resized': { nodeId: string; width: number; height: number; prevWidth: number; prevHeight: number };
+  'note:formatChanged': { nodeId: string; patch: Record<string, unknown> };
+  'note:formatReset': { nodeId: string };
 }
 
 type Handler<E extends EventName> = (payload: EventPayloads[E]) => void;

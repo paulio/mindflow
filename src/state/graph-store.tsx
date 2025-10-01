@@ -43,6 +43,9 @@ interface GraphContext extends GraphState {
   resizeRectangle(nodeId: string, width: number, height: number, gesture?: { prevWidth: number; prevHeight: number; prevX: number; prevY: number; newX?: number; newY?: number }): void;
   resizeRectangleEphemeral(nodeId: string, width: number, height: number, x: number, y: number): void;
   updateEdgeHandles(edgeId: string, sourceHandleId?: string | null, targetHandleId?: string | null): void;
+  // Rich note formatting updates
+  updateNoteFormatting(nodeId: string, patch: Partial<Pick<NodeRecord,'fontFamily'|'fontSize'|'fontWeight'|'italic'|'underline'|'highlight'|'backgroundOpacity'|'overflowMode'|'hideShapeWhenUnselected'|'maxHeight'>>): void;
+  resetNoteFormatting(nodeId: string): void;
 }
 
 const Ctx = createContext<GraphContext | null>(null);
@@ -305,6 +308,38 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     });
   }, [graph, nodes]);
+
+  // Internal helper to persist a single node after mutation
+  const persistNode = useCallback((nr: NodeRecord) => { if (graph) void saveNodes(graph.id, [nr]); }, [graph]);
+
+  const updateNoteFormatting = useCallback((nodeId: string, patch: Partial<Pick<NodeRecord,'fontFamily'|'fontSize'|'fontWeight'|'italic'|'underline'|'highlight'|'backgroundOpacity'|'overflowMode'|'hideShapeWhenUnselected'|'maxHeight'>>) => {
+    if (!graph) return;
+    setNodes(ns => ns.map(n => {
+      if (n.id !== nodeId || n.nodeKind !== 'note') return n;
+      const next: NodeRecord = { ...n, ...patch, lastModified: new Date().toISOString() };
+      // Clamp logic
+      if (next.fontSize && (next.fontSize < 10 || next.fontSize > 48)) {
+        next.fontSize = Math.min(48, Math.max(10, next.fontSize));
+      }
+      if (typeof next.backgroundOpacity === 'number') {
+        next.backgroundOpacity = Math.min(100, Math.max(0, Math.round(next.backgroundOpacity)));
+      }
+      persistNode(next);
+      events.emit('note:formatChanged', { nodeId, patch });
+      return next;
+    }));
+  }, [graph, persistNode]);
+
+  const resetNoteFormatting = useCallback((nodeId: string) => {
+    if (!graph) return;
+    setNodes(ns => ns.map(n => {
+      if (n.id !== nodeId || n.nodeKind !== 'note') return n;
+      const reset: NodeRecord = { ...n, fontFamily: 'Inter', fontSize: 14, fontWeight: 'normal', italic: false, underline: false, highlight: false, backgroundOpacity: 100, overflowMode: 'auto-resize', hideShapeWhenUnselected: false, maxHeight: 280, lastModified: new Date().toISOString() };
+      persistNode(reset);
+      events.emit('note:formatReset', { nodeId });
+      return reset;
+    }));
+  }, [graph, persistNode]);
 
   const moveNode = useCallback((nodeId: string, x: number, y: number) => {
     if (!graph) return;
@@ -758,7 +793,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles, updateNoteFormatting, resetNoteFormatting }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

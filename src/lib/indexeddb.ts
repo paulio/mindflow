@@ -73,6 +73,24 @@ export async function loadGraph(graphId: string): Promise<PersistenceSnapshot | 
   await db.put('graphs', graph);
   const nodes = await db.getAllFromIndex('graphNodes','graphId', graphId);
   const edges = await db.getAllFromIndex('graphEdges','graphId', graphId);
+  // Migration / default injection for Feature 004 rich note fields
+  // We do this in-memory to avoid eager writes; persistence occurs on first save.
+  for (const n of nodes as NodeRecord[]) {
+    if (n.nodeKind === 'note') {
+      // Provide defaults only if undefined to preserve existing explicit values
+      if (n.fontSize == null) n.fontSize = 14;
+      if (!n.fontFamily) n.fontFamily = 'Inter';
+      if (n.fontWeight == null) n.fontWeight = 'normal';
+      if (n.italic == null) n.italic = false;
+      if (n.underline == null) n.underline = false; // reserved future toggle
+      if (n.highlight == null) n.highlight = false;
+      if (n.backgroundOpacity == null) n.backgroundOpacity = 100;
+      if (!n.overflowMode) n.overflowMode = 'auto-resize';
+      if (n.hideShapeWhenUnselected == null) n.hideShapeWhenUnselected = false;
+      if (n.maxHeight == null) n.maxHeight = 280; // vertical auto-resize ceiling
+      // maxWidth intentionally omitted v1 (manual width wins)
+    }
+  }
   // Sort according to serialization contract
   nodes.sort((a,b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
   edges.sort((a,b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));

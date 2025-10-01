@@ -15,7 +15,13 @@ describe('Persistence Schema Contract', () => {
         settings: { autoLoadLast: true },
         viewport: { x: 0, y: 0, zoom: 1 }
       },
-      nodes: [],
+      nodes: [
+        {
+          id: 'n1', graphId: 'g1', text: 'Hello', x: 10, y: 20, created: new Date().toISOString(), lastModified: new Date().toISOString(),
+          nodeKind: 'note', fontFamily: 'Inter', fontSize: 14, fontWeight: 'normal', italic: false, underline: false, highlight: false,
+          bgColor: '#ffeeaa', textColor: '#222222', backgroundOpacity: 80, overflowMode: 'auto-resize', hideShapeWhenUnselected: false, maxHeight: 280
+        }
+      ],
       edges: []
     };
     const ok = validate(sample);

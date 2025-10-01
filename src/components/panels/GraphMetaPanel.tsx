@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useGraph } from '../../state/graph-store';
 import { exportGraphAsMarkdown, exportGraphAsPng, triggerDownload } from '../../lib/export';
 import { useTheme } from '../../state/theme-store';
+import { NoteFormatPanel } from './NoteFormatPanel';
 
 export const GraphMetaPanel: React.FC = () => {
   const { graph, nodes, edges, renameGraph, selectedNodeId, selectNode, levels, removeGraph, cloneCurrent, updateNodeColors, updateNodeZOrder, updateNoteAlignment } = useGraph() as any;
@@ -195,6 +196,11 @@ export const GraphMetaPanel: React.FC = () => {
                     );
                   })}
                 </div>
+              </div>
+            )}
+            {isNote && (
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                <NoteFormatPanel />
               </div>
             )}
           </div>

@@ -26,6 +26,18 @@ export interface NodeRecord {
   height?: number; // rectangles: persisted height (FR-041..FR-044)
   textAlign?: 'left' | 'center' | 'right'; // notes: horizontal alignment
   textVAlign?: 'top' | 'middle' | 'bottom'; // notes: vertical alignment
+  // Rich note formatting (Feature 004)
+  fontFamily?: string; // resolved/verified font family token
+  fontSize?: number; // px within 10-48
+  fontWeight?: number | 'normal' | 'bold'; // simplified weight control
+  italic?: boolean;
+  underline?: boolean; // reserved for potential future UI
+  highlight?: boolean; // emphasis flag
+  backgroundOpacity?: number; // 0-100
+  overflowMode?: 'truncate' | 'auto-resize' | 'scroll';
+  hideShapeWhenUnselected?: boolean;
+  maxWidth?: number; // advisory manual width limit (may be unused v1)
+  maxHeight?: number; // vertical auto-resize ceiling (default 280)
 }
 
 export interface EdgeRecord {
