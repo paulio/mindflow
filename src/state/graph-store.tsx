@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph, persistNodeDeletion, saveReferences } from '../lib/indexeddb';
+import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph, persistNodeDeletion, saveReferences, deleteReferences } from '../lib/indexeddb';
 import { createNode, createEdge } from '../lib/graph-domain';
 import { computeInitialBorderColour, BORDER_COLOUR_PALETTE, ROOT_FALLBACK } from '../lib/node-border-palette';
 import { NodeRecord, EdgeRecord, GraphRecord, ReferenceConnectionRecord } from '../lib/types';
@@ -533,15 +533,23 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setReferences(rs => {
       const target = rs.find(r => r.id === id);
       if (!target) return rs;
+      // Persist deletion immediately
+      void deleteReferences(target.graphId, [id]);
       pushUndo({
         type: 'delete-reference',
-        undo: () => setReferences(inner => inner.some(r => r.id === id) ? inner : [...inner, target]),
-        redo: () => setReferences(inner => inner.filter(r => r.id !== id))
+        undo: () => {
+          setReferences(inner => inner.some(r => r.id === id) ? inner : [...inner, target]);
+          void saveReferences(target.graphId, [target]);
+          events.emit('reference:created', { id: target.id, graphId: target.graphId, sourceNodeId: target.sourceNodeId, targetNodeId: target.targetNodeId, style: target.style });
+        },
+        redo: () => {
+          setReferences(inner => inner.filter(r => r.id !== id));
+          void deleteReferences(target.graphId, [id]);
+          events.emit('reference:deleted', { id, graphId: target.graphId });
+        }
       });
       events.emit('reference:deleted', { id, graphId: target.graphId });
-  const remaining = rs.filter(r => r.id !== id);
-  // Soft-delete: we aren't removing from IndexedDB immediately; could add a deleteReferences helper if needed.
-  return remaining;
+      return rs.filter(r => r.id !== id);
     });
   }, []);
 

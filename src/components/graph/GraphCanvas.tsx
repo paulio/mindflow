@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import ReactFlow, { Background, Controls, NodeProps, Node, OnNodesChange, Connection, Handle, Position, OnConnectStart, OnConnectEnd, useReactFlow, applyNodeChanges, MarkerType } from 'reactflow';
+import { events } from '../../lib/events';
 import { ThoughtEdge } from './ThoughtEdge';
 import { ReferenceEdge } from './ReferenceEdge';
 import { useGraph } from '../../state/graph-store';
@@ -100,6 +101,24 @@ export const GraphCanvas: React.FC = () => {
   const [flowNodes, setFlowNodes] = useState<any[]>([]);
   // Version bump to coerce ReactFlow rerender when selection changes programmatically
   const [selectionVersion, setSelectionVersion] = useState(0);
+  // Force a ReactFlow remount when a reference arrow style changes so markers redraw immediately.
+  useEffect(() => {
+    const off = events.on('reference:styleChanged', () => {
+      setSelectionVersion(v => v + 1);
+    });
+    return () => { off?.(); };
+  }, []);
+  // Also remount when selection changes so the newly unselected edge gets fresh marker objects.
+  const prevRefId = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevRefId.current !== null || selectedReferenceId !== null) {
+      // Only bump after initial mount; always bump when the selected reference id changes (including being cleared).
+      if (prevRefId.current !== selectedReferenceId) {
+        setSelectionVersion(v => v + 1);
+      }
+    }
+    prevRefId.current = selectedReferenceId;
+  }, [selectedReferenceId]);
   // Track handle drag type so we can hide the opposite type while dragging to prevent overlap confusion
   const [activeDragType, setActiveDragType] = useState<'source' | 'target' | null>(null);
   // Initialize / merge store nodes into local state (add new, update labels). Positions updated when not currently dragging.
