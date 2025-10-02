@@ -3,7 +3,11 @@ import { findRootNodeId } from './hierarchy';
 import { resolveNodeBackground } from './background-precedence';
 
 function escapeMarkdown(text: string): string {
-  return text.replace(/[*_#`>/\\-]/g, m => '\\' + m).replace(/\r?\n+/g, ' ');
+  // Replace newline sequences with a single space, then collapse runs of spaces to a single space.
+  return text
+    .replace(/\r?\n+/g, ' ')   // newline -> space
+    .replace(/ {2,}/g, ' ')      // collapse multiple spaces
+    .trimEnd();                  // avoid trailing spaces at line end
 }
 
 export function exportGraphAsMarkdown(graph: GraphRecord, nodes: NodeRecord[], edges: EdgeRecord[]): string {
@@ -101,17 +105,94 @@ export async function exportGraphAsPng(graph: GraphRecord, nodes: NodeRecord[], 
   // Approx node dimensions (current styling): width dynamic; we'll measure longest text length
   const theme = resolveThemeFromDOM();
   const padding = 32;
+  // Multiline + dimension measurement
+  const lineHeight = 14; // px (approximate UI line height)
+  interface Dim { w: number; h: number; lines: string[]; }
+  const dims = new Map<string, Dim>();
+  const INNER_PADDING_X = 4; // matches inner body padding in ThoughtNode
+  const MAX_W = 240;
+  const MIN_W = 100;
+  const MIN_H = 30;
+  // Helper to estimate width if DOM not found (pre-wrap)
+  function roughEstimateWidth(lines: string[]): number {
+    const longest = lines.reduce((m, l) => Math.max(m, l.length), 0);
+    return Math.min(MAX_W, Math.max(MIN_W, longest * 7 + INNER_PADDING_X * 2 + 16));
+  }
+  function measureFromDOM(id: string): { w: number; h: number } | null {
+    try {
+      const esc = (window as any).CSS?.escape ? (window as any).CSS.escape(id) : id.replace(/"/g, '\\"');
+      const el = document.querySelector(`.react-flow__node[data-id="${esc}"]`);
+      if (!el) return null;
+      const r = (el as HTMLElement).getBoundingClientRect();
+      if (r.width < 10 || r.height < 10) return null;
+      return { w: r.width, h: r.height };
+    } catch { return null; }
+  }
+  // Canvas context for measuring text to wrap accurately
+  const measureCanvas = document.createElement('canvas');
+  const mctx = measureCanvas.getContext('2d');
+  if (mctx) { mctx.font = '12px system-ui'; mctx.textBaseline = 'top'; }
+  function wrapLine(raw: string, maxWidth: number): string[] {
+    if (!mctx) return [raw];
+    if (mctx.measureText(raw).width <= maxWidth) return [raw];
+    const words = raw.split(/(\s+)/); // keep whitespace tokens
+    const out: string[] = [];
+    let cur = '';
+    for (const token of words) {
+      const candidate = cur + token;
+      if (mctx.measureText(candidate).width <= maxWidth) {
+        cur = candidate;
+      } else {
+        if (cur.trim().length) out.push(cur.trimEnd());
+        // If single token wider than max, hard-break by characters
+        if (mctx.measureText(token).width > maxWidth) {
+          let chunk = '';
+            for (const ch of token) {
+              if (mctx.measureText(chunk + ch).width <= maxWidth) {
+                chunk += ch;
+              } else {
+                if (chunk.length) out.push(chunk);
+                chunk = ch;
+              }
+            }
+          if (chunk.length) cur = chunk; else cur = '';
+        } else {
+          cur = token;
+        }
+      }
+    }
+    if (cur.trim().length) out.push(cur.trimEnd());
+    return out.length ? out : [''];
+  }
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const n of nodes) {
+    const rawText = (n.text || 'New Thought');
+    const baseLines = rawText.split(/\r?\n/);
+    const domDim = measureFromDOM(n.id); // if present we still wrap to keep consistency; width acts as constraint
+    let w = domDim ? domDim.w : (n.width ? Math.min(MAX_W, Math.max(MIN_W, n.width)) : roughEstimateWidth(baseLines));
+    w = Math.max(MIN_W, Math.min(MAX_W, w));
+    const contentMax = Math.max(20, w - INNER_PADDING_X * 2);
+    let wrapped: string[] = [];
+    for (const bl of baseLines) {
+      const parts = wrapLine(bl, contentMax);
+      wrapped.push(...parts);
+    }
+    // Recalculate width to fit the widest wrapped line if we didn't rely on DOM measurement
+    if (!domDim && mctx) {
+      let maxLine = 0; for (const l of wrapped) { const lw = mctx.measureText(l).width; if (lw > maxLine) maxLine = lw; }
+      const targetW = maxLine + INNER_PADDING_X * 2 + 1; // +1 for rounding
+      w = Math.max(MIN_W, Math.min(MAX_W, Math.max(w, targetW)));
+    }
+    let h = Math.max(MIN_H, wrapped.length * lineHeight + 8);
+    if (n.height) h = Math.max(h, n.height);
+    dims.set(n.id, { w, h, lines: wrapped });
     minX = Math.min(minX, n.x);
     minY = Math.min(minY, n.y);
-    maxX = Math.max(maxX, n.x);
-    maxY = Math.max(maxY, n.y);
+    maxX = Math.max(maxX, n.x + w);
+    maxY = Math.max(maxY, n.y + h);
   }
-  const approxW = 160; // heuristic width; nodes have maxWidth 240 but text may wrap
-  const approxH = 48;  // includes handles offset margin
-  const width = (maxX - minX) + approxW + padding * 2;
-  const height = (maxY - minY) + approxH + padding * 2;
+  const width = (maxX - minX) + padding * 2;
+  const height = (maxY - minY) + padding * 2;
   const canvas = document.createElement('canvas');
   canvas.width = Math.min(width, 8000);
   canvas.height = Math.min(height, 8000);
@@ -122,7 +203,8 @@ export async function exportGraphAsPng(graph: GraphRecord, nodes: NodeRecord[], 
   // Build node lookup and center positions
   const center = new Map<string, { x: number; y: number }>();
   for (const n of nodes) {
-    center.set(n.id, { x: (n.x - minX) + padding + approxW/2, y: (n.y - minY) + padding + approxH/2 });
+    const d = dims.get(n.id)!;
+    center.set(n.id, { x: (n.x - minX) + padding + d.w/2, y: (n.y - minY) + padding + d.h/2 });
   }
   // Edges
   ctx.strokeStyle = theme.edgeColor;
@@ -138,7 +220,7 @@ export async function exportGraphAsPng(graph: GraphRecord, nodes: NodeRecord[], 
   ctx.textBaseline = 'middle';
   for (const n of nodes) {
     const c = center.get(n.id)!;
-    const w = approxW; const h = 30;
+    const { w, h, lines } = dims.get(n.id)!;
     const x = c.x - w/2; const y = c.y - h/2;
     // Derive colours using the same precedence as the live node components
     const fill = resolveNodeBackground(n) || theme.nodeBg;
@@ -158,9 +240,16 @@ export async function exportGraphAsPng(graph: GraphRecord, nodes: NodeRecord[], 
     ctx.quadraticCurveTo(x, y, x+r, y);
     ctx.closePath();
     ctx.fill(); ctx.stroke();
-    const text = (n.text || 'New Thought').slice(0,60).replace(/\n+/g,' ');
+    // Text lines already prepared in dims
     ctx.fillStyle = theme.nodeText;
-    ctx.fillText(text, c.x, c.y);
+    ctx.textBaseline = 'top';
+    const totalTextHeight = lines.length * lineHeight;
+    let ty = c.y - totalTextHeight / 2;
+    for (const line of lines) {
+      const clipped = line.slice(0, 500); // generous limit
+      ctx.fillText(clipped, c.x, ty);
+      ty += lineHeight;
+    }
   }
   return await new Promise(resolve => canvas.toBlob(b => resolve(b), 'image/png'));
 }
