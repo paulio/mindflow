@@ -15,7 +15,7 @@ Open http://localhost:5173 (default Vite port).
 ## 3. Create First Mind-Map
 1. Landing screen auto-loads last graph if exists; otherwise click "New Map".
 2. Click canvas to create first node or select existing node to reveal NSEW handles.
-3. Drag a handle outward >80px and release to spawn a connected node.
+3. Drag a handle outward >40px and release to spawn a connected node. (Updated from 80px on 2025-10-02.)
 4. Type to edit node text (autosave badge shows pending then saved).
 
 ## 4. Pan & Zoom
@@ -58,7 +58,7 @@ npm run typecheck   # tsc --noEmit
 - Create >5 nodes rapidly: no orphan edges.
 - Reload page: last map auto-loaded.
 - Exceed 255 chars attempt: input blocked gracefully.
-- Drag handle <80px: node not created.
+- Drag handle <40px: node not created.
 - Delete graph: disappears from list.
 
 ## 13. Troubleshooting

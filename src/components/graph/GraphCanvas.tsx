@@ -172,7 +172,7 @@ export const GraphCanvas: React.FC = () => {
   // Track the start of a connection drag so we can create a node if released on pane.
   const connectStartRef = useRef<{ nodeId: string; handleId?: string; startClientX: number; startClientY: number } | null>(null);
 
-  const DRAG_THRESHOLD = 80; // px in flow space (after zoom scaling) consistent with earlier spec
+  const DRAG_THRESHOLD = 40; // Halved from 80 per request: shorter drag creates node/connection
   const rfNodes = flowNodes; // already memoized by state
   const rfEdges = useMemo(() => {
     const thoughtEdges = edges.map((e: any) => ({

@@ -5,8 +5,8 @@ import { useGraph } from '../../state/graph-store';
 interface Props { nodeId: string; baseX: number; baseY: number; visible: boolean; }
 // Nominal direction vectors retained only for initial direction sign reference.
 const nominalDirection = { north: [0, -120], south: [0, 120], east: [160, 0], west: [-160, 0] } as const;
-// Drag distance (pixels) required to trigger creation (spec FR-020 requires >=80px to create, else cancel)
-const DRAG_THRESHOLD = 80;
+// Drag distance (pixels) required to trigger creation; reduced from 80 to 40 (user request)
+const DRAG_THRESHOLD = 40;
 
 export const NodeHandles: React.FC<Props> = ({ nodeId, baseX, baseY, visible }) => {
   const { addConnectedNode, graph } = useGraph();
