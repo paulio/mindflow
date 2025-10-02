@@ -158,6 +158,24 @@ export async function saveReferences(graphId: string, upserts: ReferenceConnecti
   await tx.done;
 }
 
+export async function deleteReferences(graphId: string, ids: string[]) {
+  if (!ids.length) return;
+  const db = await initDB();
+  if (!db.objectStoreNames.contains('graphReferences')) return; // backward compatibility
+  const tx = db.transaction(['graphReferences','graphs'], 'readwrite');
+  const store = tx.objectStore('graphReferences');
+  for (const id of ids) {
+    // graphReferences uses composite key [graphId, id]
+    await store.delete([graphId, id]);
+  }
+  const graph = await tx.objectStore('graphs').get(graphId) as GraphRecord | undefined;
+  if (graph) {
+    graph.lastModified = nowIso();
+    await tx.objectStore('graphs').put(graph);
+  }
+  await tx.done;
+}
+
 export async function deleteGraph(graphId: string) {
   const db = await initDB();
   const stores: any[] = ['graphs','graphNodes','graphEdges'];
