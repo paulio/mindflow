@@ -1,5 +1,6 @@
 import { NodeRecord, EdgeRecord, GraphRecord } from './types';
-import { computeLevels, findRootNodeId } from './hierarchy';
+import { findRootNodeId } from './hierarchy';
+import { resolveNodeBackground } from './background-precedence';
 
 function escapeMarkdown(text: string): string {
   return text.replace(/[*_#`>/\\-]/g, m => '\\' + m).replace(/\r?\n+/g, ' ');
@@ -7,23 +8,74 @@ function escapeMarkdown(text: string): string {
 
 export function exportGraphAsMarkdown(graph: GraphRecord, nodes: NodeRecord[], edges: EdgeRecord[]): string {
   if (!nodes.length) return `# ${graph.name}\n(Empty graph)`;
-  const rootId = findRootNodeId(nodes) as string;
-  const levels = computeLevels(rootId, nodes, edges);
-  // Deterministic ordering: by level then created timestamp then id
+
+  // Build adjacency (undirected)
+  const adj = new Map<string, Set<string>>();
+  function add(a: string, b: string) { (adj.get(a) || adj.set(a, new Set()).get(a)!).add(b); }
+  for (const e of edges) { add(e.sourceNodeId, e.targetNodeId); add(e.targetNodeId, e.sourceNodeId); }
+
   const byId = new Map(nodes.map(n => [n.id, n] as const));
-  const ordered = [...nodes].sort((a,b) => {
-    const la = levels.get(a.id) ?? 0; const lb = levels.get(b.id) ?? 0;
-    if (la !== lb) return la - lb;
-    if (a.created !== b.created) return a.created.localeCompare(b.created);
-    return a.id.localeCompare(b.id);
-  });
+  // Sort all nodes by created then id for stable deterministic ordering.
+  const globalOrder = [...nodes].sort((a,b) => a.created === b.created ? a.id.localeCompare(b.id) : a.created.localeCompare(b.created));
+  const globalRootId = findRootNodeId(nodes) as string; // earliest created overall
+
+  const visited = new Set<string>();
   const lines: string[] = [];
-  for (const n of ordered) {
-    const lvl = levels.get(n.id) ?? 0;
-    const indent = '  '.repeat(lvl);
-    const text = escapeMarkdown(n.text || 'New Thought');
-    lines.push(`${indent}- ${text}`);
+
+  interface ParentMap { [id: string]: string | null; }
+
+  // Build a spanning tree for a component starting from a chosen root (earliest created in that component)
+  function buildComponentTree(rootId: string) {
+    const queue: string[] = [rootId];
+    visited.add(rootId);
+    const depth = new Map<string, number>(); depth.set(rootId, 0);
+    const parent: ParentMap = { [rootId]: null };
+    while (queue.length) {
+      const cur = queue.shift()!;
+      const nbrs = adj.get(cur);
+      if (!nbrs) continue;
+      // Determine traversal order: stable by (created, id)
+      const orderedNbrs = [...nbrs].filter(id => !visited.has(id)).sort((a,b) => {
+        const na = byId.get(a)!; const nb = byId.get(b)!;
+        return na.created === nb.created ? na.id.localeCompare(nb.id) : na.created.localeCompare(nb.created);
+      });
+      for (const nId of orderedNbrs) {
+        visited.add(nId);
+        parent[nId] = cur;
+        depth.set(nId, (depth.get(cur) || 0) + 1);
+        queue.push(nId);
+      }
+    }
+    // Build children map
+    const children = new Map<string, string[]>();
+    for (const id of Object.keys(parent)) { const p = parent[id]; if (p !== null) { (children.get(p) || children.set(p, []).get(p)!).push(id); } }
+    // Sort each children list deterministically
+    for (const [pid, arr] of children) {
+      arr.sort((a,b) => {
+        const na = byId.get(a)!; const nb = byId.get(b)!;
+        return na.created === nb.created ? na.id.localeCompare(nb.id) : na.created.localeCompare(nb.created);
+      });
+    }
+    // DFS output respecting child ordering
+    function emit(id: string) {
+      const d = depth.get(id) || 0;
+      const indent = '  '.repeat(d);
+      const rec = byId.get(id)!;
+      lines.push(`${indent}- ${escapeMarkdown(rec.text || 'New Thought')}`);
+      const kids = children.get(id) || [];
+      for (const k of kids) emit(k);
+    }
+    emit(rootId);
   }
+
+  // Components: first ensure the global root component is emitted first, then others in creation order.
+  if (globalRootId) buildComponentTree(globalRootId);
+  for (const n of globalOrder) {
+    if (!visited.has(n.id)) {
+      buildComponentTree(n.id);
+    }
+  }
+
   return lines.join('\n') + '\n';
 }
 
@@ -88,7 +140,10 @@ export async function exportGraphAsPng(graph: GraphRecord, nodes: NodeRecord[], 
     const c = center.get(n.id)!;
     const w = approxW; const h = 30;
     const x = c.x - w/2; const y = c.y - h/2;
-    ctx.fillStyle = theme.nodeBg; ctx.strokeStyle = theme.nodeBorder; ctx.lineWidth = theme.borderWidth; 
+    // Derive colours using the same precedence as the live node components
+    const fill = resolveNodeBackground(n) || theme.nodeBg;
+    const borderColour = n.currentBorderColour || n.originalBorderColour || theme.nodeBorder;
+    ctx.fillStyle = fill; ctx.strokeStyle = borderColour; ctx.lineWidth = theme.borderWidth;
     // rounded rect
     const r = theme.radius;
     ctx.beginPath();
