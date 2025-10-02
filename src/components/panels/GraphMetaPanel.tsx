@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useGraph } from '../../state/graph-store';
+import { BORDER_COLOUR_PALETTE } from '../../lib/node-border-palette';
 import { exportGraphAsMarkdown, exportGraphAsPng, triggerDownload } from '../../lib/export';
 import { useTheme } from '../../state/theme-store';
 import { NoteFormatPanel } from './NoteFormatPanel';
 
 export const GraphMetaPanel: React.FC = () => {
-  const { graph, nodes, edges, renameGraph, selectedNodeId, selectNode, levels, removeGraph, cloneCurrent, updateNodeColors, updateNodeZOrder, updateNoteAlignment, references, selectedReferenceId, selectReference, updateReferenceStyle, updateReferenceLabel, toggleReferenceLabelVisibility, deleteReference, } = useGraph() as any;
+  const { graph, nodes, edges, renameGraph, selectedNodeId, selectNode, levels, removeGraph, cloneCurrent, updateNodeColors, updateNodeZOrder, updateNoteAlignment, references, selectedReferenceId, selectReference, updateReferenceStyle, updateReferenceLabel, toggleReferenceLabelVisibility, deleteReference, overrideNodeBorder, clearNodeBorderOverride, getNodeBorderInfo } = useGraph() as any;
   const { theme, setTheme, available } = useTheme();
   const [name, setName] = useState(graph?.name ?? '');
   if (!graph) return null;
@@ -21,12 +22,13 @@ export const GraphMetaPanel: React.FC = () => {
         const node = nodes.find((n: any) => n.id === selectedNodeId);
         if (!node) return null;
         const lvl = levels.get(selectedNodeId) ?? 0;
-        const palette = ['#1e222b','#2d323f','#444b5a','#556070','#6b7687','#8892a0','#b48ead','#a3be8c','#d08770','#bf616a'];
-        const isNote = node.nodeKind === 'note';
+  const palette = BORDER_COLOUR_PALETTE;
+    const isNote = node.nodeKind === 'note';
   const isRect = node.nodeKind === 'rect';
+  const isThought = !node.nodeKind || node.nodeKind === 'thought';
   const hAlign = node.textAlign || 'center';
   const vAlign = node.textVAlign || 'middle';
-  const showColorControls = isNote || isRect;
+  const showColorControls = isNote || isRect || isThought;
   const showZOrder = isNote || isRect; // toolbar nodes only for now
         return (
           <div style={{ fontSize: 12, marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -36,9 +38,61 @@ export const GraphMetaPanel: React.FC = () => {
                 <strong style={{ fontSize:12 }}>Colors</strong>
                 <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
                   {palette.map(c => (
-                    <button key={c} aria-label={`Set background ${c}`} onClick={() => updateNodeColors(node.id, c, node.textColor)} style={{ width:20, height:20, border: node.bgColor === c ? '2px solid #fff' : '1px solid #333', background:c, cursor:'pointer', padding:0 }} />
+                    <button
+                      key={c}
+                      aria-label={`Set background ${c}`}
+                      onClick={() => updateNodeColors(node.id, c, node.textColor)}
+                      style={{ width:20, height:20, border: node.bgColor === c ? '2px solid #fff' : '1px solid #333', background:c, cursor:'pointer', padding:0 }}
+                    />
                   ))}
                 </div>
+            {/* Border Colour Override Section */}
+            <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+              <strong style={{ fontSize:12 }}>Border Colour</strong>
+              {(() => {
+                const info = getNodeBorderInfo(node.id);
+                if (!info) return null;
+                return (
+                  <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
+                      {palette.map(c => {
+                        const active = info.colour === c && info.overridden;
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            aria-label={`Set border colour ${c}`}
+                            onClick={() => overrideNodeBorder(node.id, c)}
+                            style={{ width:20, height:20, background:c, border: active ? '2px solid #fff' : '1px solid #333', cursor:'pointer', padding:0 }}
+                          />
+                        );
+                      })}
+                    </div>
+                    <label style={{ fontSize:11, display:'flex', gap:4, alignItems:'center' }}>
+                      <span>Custom Border</span>
+                      <input
+                        type="text"
+                        maxLength={7}
+                        placeholder="#rrggbb"
+                        defaultValue={info.overridden ? info.colour : ''}
+                        onBlur={(e) => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) overrideNodeBorder(node.id, v); }}
+                        style={{ flex:1 }}
+                      />
+                    </label>
+                    <div style={{ display:'flex', gap:6 }}>
+                      <button
+                        type="button"
+                        aria-label="Clear border override"
+                        disabled={!info.overridden}
+                        onClick={() => clearNodeBorderOverride(node.id)}
+                        style={{ background: info.overridden ? '#2a2f38' : '#1a1c21', color:'#fff', padding:'4px 8px', border:'1px solid #444', cursor: info.overridden ? 'pointer' : 'default', fontSize:12 }}
+                      >Reset</button>
+                      <span style={{ fontSize:11, opacity:0.7, alignSelf:'center' }}>{info.overridden ? 'Overridden Border' : 'Default Border'}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
                 <label style={{ fontSize:11, display:'flex', gap:4, alignItems:'center' }}>
                   <span>Custom</span>
                   <input

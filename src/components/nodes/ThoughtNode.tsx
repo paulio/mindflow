@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ariaNodeLabel, focusClass } from '../../lib/a11y';
 import { useGraph } from '../../state/graph-store';
+// @ts-ignore temporary resolution quirk: module exists at runtime
+import { resolveNodeBackground, resolveAccentColour } from '../../lib/background-precedence';
 
 interface Props { id: string; text: string; selected?: boolean; }
 export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
@@ -36,7 +38,6 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
     if (draft !== text) updateNodeText(id, draft.slice(0,255));
     stopEditing();
   }, [draft, text, id, updateNodeText, stopEditing]);
-
   const cancel = useCallback(() => { setDraft(text); stopEditing(); }, [text, stopEditing]);
 
   function autoResize() {
@@ -63,6 +64,9 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
     requestAnimationFrame(autoResize);
   }
 
+  const record = React.useMemo(() => nodes.find((n: any) => n.id === id), [nodes, id]);
+  const borderColour = React.useMemo(() => resolveAccentColour(record), [record]);
+  const background = React.useMemo(() => resolveNodeBackground(record), [record]);
   return (
     <div
       className={focusClass()}
@@ -74,9 +78,11 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
         if (!editing) startEditing(id);
       }}
       style={{
-  padding: 4,
-        background: selected ? 'var(--mf-node-bg-selected)' : 'var(--mf-node-bg)',
-        border: `${selected ? 'var(--mf-node-border-width-selected)' : 'var(--mf-node-border-width)'} solid ${selected ? 'var(--mf-node-border-selected)' : 'var(--mf-node-border)'}`,
+        // Outer frame: shows override/default border colour (the "green" border in screenshot)
+        padding: 0,
+        background: 'transparent',
+  border: `${selected ? 'var(--mf-node-border-width-selected)' : 'var(--mf-node-border-width)'} solid var(--mf-node-border)`,
+        // Keep existing selection box-shadow for visual consistency (can be removed if outline alone is desired)
         boxShadow: selected ? 'var(--mf-selection-outline)' : 'none',
         transition: 'background .15s var(--ease-standard), border .15s var(--ease-standard), box-shadow .15s var(--ease-standard)',
         borderRadius: 6,
@@ -91,9 +97,23 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
         color: 'var(--mf-node-text)',
         position: 'relative', // needed so floating delete button positions correctly
         overflow: 'visible',
+        // Dynamic focus ring colour (picked up by .focus-ring outline style)
+        // Type assertion to satisfy TS for custom CSS variable property.
+        '--color-focus-ring': borderColour
   // Delete button will float fully outside; no need to adjust paddingTop
-      }}
+      } as React.CSSProperties}
     >
+      {/* Inner body now shows hierarchical/override colour as its background unless user-specified */}
+      <div
+        style={{
+          background,
+          padding: 4,
+          borderRadius: 4,
+          border: '1px solid rgba(255,255,255,0.15)', // subtle inner stroke (the previous border - "red" in screenshot)
+          boxSizing: 'border-box'
+        }}
+        onDoubleClick={(e) => { e.stopPropagation(); if (!editing) startEditing(id); }}
+      >
       {editing ? (
         <textarea
           ref={textareaRef}
@@ -108,6 +128,7 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
       ) : (
         <span style={{ whiteSpace:'pre-wrap', display:'block', textAlign:'center' }}>{text || 'New Thought'}</span>
       )}
+      </div>
       {selected && !editing && (
         <button
           type="button"
@@ -122,7 +143,7 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
             width: 22,
             height: 22,
             borderRadius: '50%',
-            border: '1px solid var(--mf-node-border)',
+            border: '1px solid ' + borderColour,
             background: isRoot ? 'rgba(255,255,255,0.15)' : 'var(--mf-node-bg)',
             color: 'var(--mf-node-text)',
             fontSize: 14,

@@ -38,6 +38,19 @@ export interface NodeRecord {
   hideShapeWhenUnselected?: boolean;
   maxWidth?: number; // advisory manual width limit (may be unused v1)
   maxHeight?: number; // vertical auto-resize ceiling (default 280)
+  // Border colour override (Feature 007)
+  /** Colour originally assigned via depth->palette mapping at creation */
+  originalBorderColour?: string;
+  /** Current effective border colour (override OR original) */
+  currentBorderColour?: string;
+  /** Index captured from palette (0-based) or -1 if fallback used */
+  borderPaletteIndex?: number;
+  /** True when user has explicitly overridden the border colour */
+  borderOverrideFlag?: boolean;
+  /** Explicit override colour (#rrggbb) when borderOverrideFlag true */
+  borderOverrideColour?: string;
+  /** Hierarchical depth used for background (fill) colour sequencing (0-root). */
+  hierDepth?: number;
 }
 
 export interface EdgeRecord {
