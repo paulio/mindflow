@@ -70,6 +70,48 @@ export async function listGraphs(): Promise<GraphRecord[]> {
   return all.sort((a,b) => b.lastModified.localeCompare(a.lastModified));
 }
 
+async function hydrateSnapshot(
+  graphRecord: GraphRecord,
+  nodes: NodeRecord[],
+  edges: EdgeRecord[],
+  references: ReferenceConnectionRecord[],
+): Promise<PersistenceSnapshot> {
+  const graphCopy: GraphRecord = { ...graphRecord };
+  const nodesCopy = nodes.map(n => ({ ...n })) as NodeRecord[];
+  const edgesCopy = edges.map(e => ({ ...e })) as EdgeRecord[];
+  const referencesCopy = references.map(r => ({ ...r })) as ReferenceConnectionRecord[];
+
+  // Migration / default injection for Feature 004 rich note fields
+  for (const n of nodesCopy) {
+    if (n.nodeKind === 'note') {
+      if (n.fontSize == null) n.fontSize = 14;
+      if (!n.fontFamily) n.fontFamily = 'Inter';
+      if (n.fontWeight == null) n.fontWeight = 'normal';
+      if (n.italic == null) n.italic = false;
+      if (n.underline == null) n.underline = false;
+      if (n.highlight == null) n.highlight = false;
+      if (n.backgroundOpacity == null) n.backgroundOpacity = 100;
+      if (!n.overflowMode) n.overflowMode = 'auto-resize';
+      if (n.hideShapeWhenUnselected == null) n.hideShapeWhenUnselected = false;
+      if (n.maxHeight == null) n.maxHeight = 280;
+    }
+  }
+
+  nodesCopy.sort((a,b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
+  edgesCopy.sort((a,b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
+
+  if (referencesCopy.length) {
+    referencesCopy.sort((a,b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
+  }
+
+  return {
+    graph: graphCopy,
+    nodes: nodesCopy,
+    edges: edgesCopy,
+    references: referencesCopy,
+  };
+}
+
 export async function loadGraph(graphId: string): Promise<PersistenceSnapshot | null> {
   const db = await initDB();
   const graph = await db.get('graphs', graphId);
@@ -83,28 +125,30 @@ export async function loadGraph(graphId: string): Promise<PersistenceSnapshot | 
     references = await db.getAllFromIndex('graphReferences','graphId', graphId) as ReferenceConnectionRecord[];
     references.sort((a,b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
   }
-  // Migration / default injection for Feature 004 rich note fields
-  // We do this in-memory to avoid eager writes; persistence occurs on first save.
-  for (const n of nodes as NodeRecord[]) {
-    if (n.nodeKind === 'note') {
-      // Provide defaults only if undefined to preserve existing explicit values
-      if (n.fontSize == null) n.fontSize = 14;
-      if (!n.fontFamily) n.fontFamily = 'Inter';
-      if (n.fontWeight == null) n.fontWeight = 'normal';
-      if (n.italic == null) n.italic = false;
-      if (n.underline == null) n.underline = false; // reserved future toggle
-      if (n.highlight == null) n.highlight = false;
-      if (n.backgroundOpacity == null) n.backgroundOpacity = 100;
-      if (!n.overflowMode) n.overflowMode = 'auto-resize';
-      if (n.hideShapeWhenUnselected == null) n.hideShapeWhenUnselected = false;
-      if (n.maxHeight == null) n.maxHeight = 280; // vertical auto-resize ceiling
-      // maxWidth intentionally omitted v1 (manual width wins)
-    }
+  return hydrateSnapshot(graph, nodes as NodeRecord[], edges as EdgeRecord[], references);
+}
+
+export async function getGraphSnapshot(graphId: string): Promise<PersistenceSnapshot | null> {
+  const db = await initDB();
+  const graph = await db.get('graphs', graphId);
+  if (!graph) return null;
+  const nodes = await db.getAllFromIndex('graphNodes','graphId', graphId) as NodeRecord[];
+  const edges = await db.getAllFromIndex('graphEdges','graphId', graphId) as EdgeRecord[];
+  let references: ReferenceConnectionRecord[] = [];
+  if (db.objectStoreNames.contains('graphReferences')) {
+    references = await db.getAllFromIndex('graphReferences','graphId', graphId) as ReferenceConnectionRecord[];
   }
-  // Sort according to serialization contract
-  nodes.sort((a,b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
-  edges.sort((a,b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
-  return { graph, nodes, edges, references };
+  return hydrateSnapshot(graph, nodes, edges, references);
+}
+
+export async function getGraphSnapshots(graphIds: string[]): Promise<PersistenceSnapshot[]> {
+  if (!graphIds.length) return [];
+  const snapshots: PersistenceSnapshot[] = [];
+  for (const id of graphIds) {
+    const snap = await getGraphSnapshot(id);
+    if (snap) snapshots.push(snap);
+  }
+  return snapshots;
 }
 
 export async function saveNodes(graphId: string, upserts: NodeRecord[]) {

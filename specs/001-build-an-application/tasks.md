@@ -29,7 +29,7 @@
 
 ### Integration Tests (User Scenarios & Validation Checklist)
 - [X] T012 [P] Integration test create first node & autosave (`tests/integration/create-first-node.spec.ts`)
-- [X] T013 [P] Integration test directional handle node creation (>=80px drag threshold) (`tests/integration/handle-create-node.spec.ts`)
+- [X] T013 [P] Integration test directional handle node creation (>=40px drag threshold) (`tests/integration/handle-create-node.spec.ts`)
 - [X] T014 [P] Integration test rapid node creation spam – no orphan edges (`tests/integration/rapid-create.spec.ts`)
 - [X] T015 [P] Integration test reload auto-loads last map (`tests/integration/reload-autoload.spec.ts`)
 - [X] T016 [P] Integration test deletion with confirm removes graph (`tests/integration/delete-graph.spec.ts`)
@@ -42,7 +42,7 @@
  - [ ] T059 [P] Integration test edit mode idempotency + Enter no-op (no text change) (`tests/integration/edit-idempotent.spec.ts`)
  - [ ] T066 [P] Integration test Shift+Enter inserts newline, remains editing, later Enter commits multi-line (FR-005c) (`tests/integration/multiline-edit.spec.ts`)
  - [ ] T067 [P] Integration test node reposition drag persists final position & edges update (FR-025) (`tests/integration/reposition-node.spec.ts`)
- - [ ] T068 [P] Integration test <80px connection drag cancels node creation (FR-020) (`tests/integration/drag-threshold-cancel.spec.ts`)
+ - [ ] T068 [P] Integration test <40px connection drag cancels node creation (FR-020) (`tests/integration/drag-threshold-cancel.spec.ts`)
  - [ ] T073 [P] Integration test Library lists existing maps & selecting one transitions to canvas (FR-031, FR-032) (`tests/integration/library-open-map.spec.ts`)
  - [ ] T074 [P] Integration test Back to Library hides canvas & shows list (FR-033) (`tests/integration/library-back.spec.ts`)
  - [ ] T075 [P] Integration test unsaved change warning on navigating back (modify text then attempt back) (FR-030, FR-033) (`tests/integration/library-unsaved-warning.spec.ts`)
@@ -105,7 +105,7 @@
 - [X] T033 Implement base App shell `src/pages/App.tsx` (layout regions: canvas, side panel)
 - [X] T034 Implement ReactFlow wrapper `src/components/graph/GraphCanvas.tsx` (node/edge types, pan/zoom config, selection)
 - [X] T035 Implement ThoughtNode component `src/components/nodes/ThoughtNode.tsx` with inline editing + default text fallback (basic version)
- - [X] T036 Implement directional handles via native React Flow (n/e/s/w) + connection-based node creation (>=80px threshold)
+ - [X] T036 Implement directional handles via native React Flow (n/e/s/w) + connection-based node creation (>=40px threshold; updated from 80px on 2025-10-02)
  - [X] T037 Implement Graph List panel `src/components/panels/GraphListPanel.tsx` (list, select, delete confirm)
  - [X] T038 Implement graph rename & metadata actions `src/components/panels/GraphMetaPanel.tsx`
  - [X] T039 Implement accessibility helpers on nodes & handles (aria-labels, tab index ordering) integrated into components (basic spatial ordering via tab sequence)

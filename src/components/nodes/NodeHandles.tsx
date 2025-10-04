@@ -5,8 +5,8 @@ import { useGraph } from '../../state/graph-store';
 interface Props { nodeId: string; baseX: number; baseY: number; visible: boolean; }
 // Nominal direction vectors retained only for initial direction sign reference.
 const nominalDirection = { north: [0, -120], south: [0, 120], east: [160, 0], west: [-160, 0] } as const;
-// Drag distance (pixels) required to trigger creation (spec FR-020 requires >=80px to create, else cancel)
-const DRAG_THRESHOLD = 80;
+// Drag distance (pixels) required to trigger creation; reduced from 80 to 40 (user request)
+const DRAG_THRESHOLD = 40;
 
 export const NodeHandles: React.FC<Props> = ({ nodeId, baseX, baseY, visible }) => {
   const { addConnectedNode, graph } = useGraph();
@@ -22,11 +22,19 @@ export const NodeHandles: React.FC<Props> = ({ nodeId, baseX, baseY, visible }) 
   const [preview, setPreview] = useState<{active:boolean; dir?: keyof typeof nominalDirection; dist:number; dx:number; dy:number; originLocalX:number; originLocalY:number}>({ active: false, dist: 0, dx: 0, dy: 0, originLocalX: 0, originLocalY: 0 });
   const rf = useReactFlow();
   const containerRef = useRef<HTMLDivElement|null>(null);
+  const finish = useCallback(() => {
+    setPreview({ active: false, dist: 0, dx: 0, dy: 0, originLocalX: 0, originLocalY: 0 });
+    startRef.current = null;
+  }, []);
   if (!graph) return null;
   function onPointerDown(dir: keyof typeof nominalDirection, ev: React.PointerEvent) {
     ev.stopPropagation();
     ev.preventDefault();
-    try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch {}
+    try {
+      ev.currentTarget.setPointerCapture(ev.pointerId);
+    } catch {
+      /* noop */
+    }
     const host = containerRef.current?.parentElement; // Node wrapper div (positioned at node top-left)
     const rect = host?.getBoundingClientRect();
     const nodeW = rect?.width ?? 120;
@@ -50,11 +58,9 @@ export const NodeHandles: React.FC<Props> = ({ nodeId, baseX, baseY, visible }) 
       anchorGraphY: anchorGraph.y,
       dir
     };
-    // eslint-disable-next-line no-console
     console.debug('[NodeHandles] pointerDown', { dir, client: { x: ev.clientX, y: ev.clientY }, originClientX, originClientY });
     setPreview({ active: true, dir, dist: 0, dx: 0, dy: 0, originLocalX, originLocalY });
   }
-  const finish = useCallback(() => { setPreview({ active: false, dist: 0, dx: 0, dy: 0, originLocalX: 0, originLocalY: 0 }); startRef.current = null; }, []);
   function onPointerMove(ev: React.PointerEvent) {
     if (!startRef.current) return;
     const { originClientX, originClientY, dir, originLocalX, originLocalY } = startRef.current;
@@ -72,7 +78,7 @@ export const NodeHandles: React.FC<Props> = ({ nodeId, baseX, baseY, visible }) 
     ev.stopPropagation();
     ev.preventDefault();
     if (!startRef.current) return;
-    const { dir, anchorGraphX, anchorGraphY, originLocalX, originLocalY, originClientX, originClientY } = startRef.current;
+  const { dir, anchorGraphX, anchorGraphY } = startRef.current;
     // Recompute graph-space delta using project() for accuracy with zoom/pan.
   const pointerGraph = rf.screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
     let gdx = pointerGraph.x - anchorGraphX;
@@ -82,25 +88,22 @@ export const NodeHandles: React.FC<Props> = ({ nodeId, baseX, baseY, visible }) 
     if (dir === 'east')  { gdx = Math.max(0, gdx); gdy = 0; }
     if (dir === 'west')  { gdx = Math.min(0, gdx); gdy = 0; }
     const dist = Math.hypot(gdx, gdy); // graph-space distance (scaled by zoom already)
-    // eslint-disable-next-line no-console
     console.debug('[NodeHandles] pointerUp', { dir, dist, threshold: DRAG_THRESHOLD });
     if (dist >= DRAG_THRESHOLD) {
       const sourceHandleId = dir[0];
       const opposite: Record<string,string> = { north: 's', south: 'n', east: 'w', west: 'e' };
       const targetHandleId = opposite[dir];
-  // eslint-disable-next-line no-console
       const NEW_W = 120; const NEW_H = 40; // nominal
       // anchorGraphX/Y represent center of source side; we offset by gdx/gdy to get new node center.
       const newCenterX = anchorGraphX + gdx;
       const newCenterY = anchorGraphY + gdy;
       const newX = newCenterX - NEW_W / 2;
       const newY = newCenterY - NEW_H / 2;
-      console.debug('[NodeHandles] creating connected node', { nodeId, dir, newX, newY, gdx, gdy, anchorGraphX, anchorGraphY, sourceHandleId, targetHandleId });
+  console.debug('[NodeHandles] creating connected node', { nodeId, dir, newX, newY, gdx, gdy, anchorGraphX, anchorGraphY, sourceHandleId, targetHandleId });
       addConnectedNode(nodeId, newX, newY, sourceHandleId, targetHandleId);
     }
     finish();
   }
-  const btnStyle: React.CSSProperties = { position: 'absolute', width: 20, height: 20, borderRadius: '50%', fontSize: 10, background: '#333', color: '#ddd', border: '1px solid #444', cursor: 'pointer' };
   const dirColors: Record<string, {bg:string;border:string;shadow:string}> = {
     north: { bg: '#1d4ed8', border: '#93c5fd', shadow: 'rgba(147,197,253,0.55)' },
     south: { bg: '#059669', border: '#6ee7b7', shadow: 'rgba(110,231,183,0.55)' },

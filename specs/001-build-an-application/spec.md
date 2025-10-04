@@ -147,7 +147,7 @@ As a user brainstorming or structuring ideas, I want to visually create and conn
 - **FR-017**: System MUST assign deterministic ordering for nodes in serialization to avoid spurious diffs.
 - **FR-018**: System MUST handle window refresh by reloading currently open graph state from persistence.
 - **FR-019**: System MUST validate node text length (max 255 characters across all lines); reject additional input beyond limit (visual feedback required). Newlines count toward total length (e.g., '\n').
-- **FR-020**: System SHOULD prevent creation of a new node if drag distance < 80px from origin node center (treat as cancelled handle drag).
+- **FR-020**: System SHOULD prevent creation of a new node if drag distance < 40px from origin node center (treat as cancelled handle drag). (Threshold reduced from 80px → 40px on 2025-10-02 per UX iteration.)
 - **FR-021**: (Reserved) Keyboard shortcuts are explicitly out of scope for initial release.
 - **FR-022**: System MUST store data locally (e.g., IndexedDB/local file) without requiring authentication; multi-device sync is out of scope.
 - **FR-023**: System MUST allow clearing (reset) of current graph (soft delete all nodes) with confirmation.
