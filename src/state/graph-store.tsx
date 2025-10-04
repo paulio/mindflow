@@ -1,10 +1,38 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph, persistNodeDeletion, saveReferences, deleteReferences } from '../lib/indexeddb';
+import pkg from '../../package.json';
+import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph, persistNodeDeletion, saveReferences, deleteReferences, initDB, generateId, getGraphSnapshots } from '../lib/indexeddb';
 import { createNode, createEdge } from '../lib/graph-domain';
 import { computeInitialBorderColour, BORDER_COLOUR_PALETTE, ROOT_FALLBACK } from '../lib/node-border-palette';
 import { NodeRecord, EdgeRecord, GraphRecord, ReferenceConnectionRecord } from '../lib/types';
 import { events } from '../lib/events';
 import { pushUndo, resetUndoHistory } from '../hooks/useUndoRedo';
+import {
+  inspectImportArchive,
+  ImportArchiveInspection,
+  ImportArchiveOptions,
+  ImportSummary,
+  ConflictResolutionResult,
+  ImportEntry,
+  CURRENT_MAP_SCHEMA_VERSION,
+  ImportSession,
+  generateExportArchive,
+  ExportArchiveResult,
+  ExportArchiveOptions,
+  EXPORT_MANIFEST_VERSION,
+} from '../lib/export';
+
+const APP_VERSION = (pkg as { version?: string }).version ?? '0.0.0';
+
+type ExportMapsOptions = Pick<ExportArchiveOptions, 'signal' | 'pauseAutosave' | 'resumeAutosave' | 'logger' | 'fileName' | 'notes'>;
+
+export interface ImportProgressEvent {
+  stage: 'applying' | 'completed' | 'cancelled' | 'failed';
+  processed: number;
+  total: number;
+  entry?: ImportEntry;
+  summary?: ImportSummary;
+  message?: string;
+}
 
 type ViewMode = 'library' | 'canvas';
 interface GraphState { graph: GraphRecord | null; nodes: NodeRecord[]; edges: EdgeRecord[]; graphs: GraphRecord[]; view: ViewMode; references: ReferenceConnectionRecord[]; }
@@ -74,6 +102,17 @@ interface GraphContext extends GraphState {
   overrideNodeBorder(nodeId: string, hex: string): void;
   clearNodeBorderOverride(nodeId: string): void;
   getNodeBorderInfo(nodeId: string): { colour: string; overridden: boolean; original: string } | null;
+  importContext: ImportArchiveInspection | null;
+  stageImport(source: Blob | ArrayBuffer | ArrayBufferView | File, options?: ImportArchiveOptions): Promise<ImportArchiveInspection>;
+  resolveImportConflict(mapId: string, resolution: ConflictResolutionResult): void;
+  finalizeImportSession(action: 'commit' | 'cancel', options?: { onProgress?: (event: ImportProgressEvent) => void }): Promise<ImportSummary | null>;
+  clearImportSession(): void;
+  selectedLibraryIds: string[];
+  replaceLibrarySelection(ids: string[]): void;
+  addLibrarySelection(ids: string[]): void;
+  toggleLibrarySelection(id: string): void;
+  clearLibrarySelection(): void;
+  exportMaps(ids: string[], options?: ExportMapsOptions): Promise<ExportArchiveResult>;
 }
 
 const Ctx = createContext<GraphContext | null>(null);
@@ -94,7 +133,31 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(null);
   const [levels, setLevels] = useState<Map<string, number>>(new Map());
   const [activeTool, setActiveTool] = useState<'note' | 'rect' | null>(null);
+  const [importContext, setImportContext] = useState<ImportArchiveInspection | null>(null);
+  const [selectedLibraryIds, setSelectedLibraryIds] = useState<string[]>([]);
   const mutationCounter = useRef(0);
+
+  const normalizeLibrarySelection = useCallback((ids: string[]) => {
+    if (!ids.length) return ids;
+    const allowed = graphs.length ? new Set(graphs.map(g => g.id)) : null;
+    const seen = new Set<string>();
+    const next: string[] = [];
+    for (const id of ids) {
+      if (!id) continue;
+      if (allowed && !allowed.has(id)) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      next.push(id);
+    }
+    if (next.length === ids.length) {
+      let identical = true;
+      for (let i = 0; i < next.length; i += 1) {
+        if (next[i] !== ids[i]) { identical = false; break; }
+      }
+      if (identical) return ids;
+    }
+    return next;
+  }, [graphs]);
 
   async function refreshList() {
     try {
@@ -102,6 +165,215 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setGraphs(await listGraphs());
     } catch { /* ignore listing errors in headless */ }
   }
+
+  async function persistGraphSnapshotRecord(
+    graphRecord: GraphRecord,
+    nodes: NodeRecord[],
+    edges: EdgeRecord[],
+    references: ReferenceConnectionRecord[],
+  ) {
+    const db = await initDB();
+    const stores: string[] = ['graphs', 'graphNodes', 'graphEdges'];
+    if (db.objectStoreNames.contains('graphReferences')) stores.push('graphReferences');
+    const tx = db.transaction(stores, 'readwrite');
+    await tx.objectStore('graphs').put(graphRecord);
+    const nodesStore = tx.objectStore('graphNodes');
+    for (const node of nodes) {
+      await nodesStore.put(node);
+    }
+    const edgesStore = tx.objectStore('graphEdges');
+    for (const edge of edges) {
+      await edgesStore.put(edge);
+    }
+    if (db.objectStoreNames.contains('graphReferences')) {
+      const refsStore = tx.objectStore('graphReferences');
+      for (const reference of references) {
+        await refsStore.put(reference);
+      }
+    }
+    await tx.done;
+  }
+
+  async function writeImportedGraph(
+    entry: ImportEntry,
+    action: 'add' | 'overwrite',
+    resolvedName?: string,
+  ): Promise<GraphRecord> {
+    const now = new Date().toISOString();
+    if (action === 'overwrite') {
+      const targetId = entry.snapshot.id;
+      await deleteGraph(targetId);
+      const graphRecord: GraphRecord = {
+        ...entry.payload.graph,
+        id: targetId,
+        name: resolvedName ?? entry.snapshot.name,
+        lastModified: entry.payload.graph.lastModified ?? now,
+        lastOpened: now,
+        created: entry.payload.graph.created ?? now,
+        schemaVersion: entry.payload.graph.schemaVersion ?? CURRENT_MAP_SCHEMA_VERSION,
+        settings: entry.payload.graph.settings ? { ...entry.payload.graph.settings } : { autoLoadLast: true },
+        viewport: entry.payload.graph.viewport ? { ...entry.payload.graph.viewport } : { x: 0, y: 0, zoom: 1 },
+      };
+      const nodes = entry.payload.nodes.map<NodeRecord>(node => ({ ...node, graphId: targetId }));
+      const edges = entry.payload.edges.map<EdgeRecord>(edge => ({ ...edge, graphId: targetId }));
+      const references = entry.payload.references.map<ReferenceConnectionRecord>(reference => ({ ...reference, graphId: targetId }));
+      await persistGraphSnapshotRecord(graphRecord, nodes, edges, references);
+      return graphRecord;
+    }
+
+    const newId = generateId();
+    const graphRecord: GraphRecord = {
+      ...entry.payload.graph,
+      id: newId,
+      name: resolvedName ?? entry.snapshot.name,
+      lastModified: entry.payload.graph.lastModified ?? now,
+      lastOpened: now,
+      created: entry.payload.graph.created ?? now,
+      schemaVersion: entry.payload.graph.schemaVersion ?? CURRENT_MAP_SCHEMA_VERSION,
+      settings: entry.payload.graph.settings ? { ...entry.payload.graph.settings } : { autoLoadLast: true },
+      viewport: entry.payload.graph.viewport ? { ...entry.payload.graph.viewport } : { x: 0, y: 0, zoom: 1 },
+    };
+    const nodes = entry.payload.nodes.map<NodeRecord>(node => ({ ...node, graphId: newId }));
+    const edges = entry.payload.edges.map<EdgeRecord>(edge => ({ ...edge, graphId: newId }));
+    const references = entry.payload.references.map<ReferenceConnectionRecord>(reference => ({ ...reference, graphId: newId }));
+    await persistGraphSnapshotRecord(graphRecord, nodes, edges, references);
+    return graphRecord;
+  }
+
+  const stageImport = useCallback(async (
+    source: Blob | ArrayBuffer | ArrayBufferView | File,
+    options?: ImportArchiveOptions,
+  ): Promise<ImportArchiveInspection> => {
+    const merged: ImportArchiveOptions = {
+      ...(options ?? {}),
+      existingGraphs: graphs,
+    };
+    const inspection = await inspectImportArchive(source as Blob | ArrayBuffer | ArrayBufferView, merged);
+    setImportContext(inspection);
+    return inspection;
+  }, [graphs]);
+
+  const resolveImportConflict = useCallback((mapId: string, resolution: ConflictResolutionResult) => {
+    const stamped: ConflictResolutionResult = {
+      ...resolution,
+      timestamp: resolution.timestamp ?? new Date().toISOString(),
+    };
+    setImportContext(ctx => {
+      if (!ctx) return ctx;
+      const entries = ctx.session.entries.map(entry =>
+        entry.snapshot.id === mapId ? { ...entry, resolution: stamped } : entry,
+      );
+      return { ...ctx, session: { ...ctx.session, entries } };
+    });
+  }, []);
+
+  const clearImportSession = useCallback(() => {
+    setImportContext(null);
+  }, []);
+
+  const finalizeImportSession = useCallback(async (
+    action: 'commit' | 'cancel',
+    opts?: { onProgress?: (event: ImportProgressEvent) => void },
+  ): Promise<ImportSummary | null> => {
+    if (!importContext) return null;
+    const onProgress = opts?.onProgress;
+    const entries = importContext.session.entries;
+    const total = entries.length;
+
+    if (action === 'cancel') {
+      const summary: ImportSummary = {
+        totalProcessed: total,
+        succeeded: 0,
+        skipped: total,
+        failed: 0,
+        messages: entries.map(entry => ({
+          mapId: entry.snapshot.id,
+          level: 'warning',
+          detail: 'Import cancelled by user before applying.',
+        })),
+      };
+      const updatedSession: ImportSession = { ...importContext.session, status: 'cancelled', summary };
+      setImportContext({ manifest: importContext.manifest, session: updatedSession });
+      onProgress?.({ stage: 'cancelled', processed: 0, total, summary, message: 'Import cancelled' });
+      return summary;
+    }
+
+    const cancelResolution = entries.find(entry => entry.resolution?.action === 'cancel');
+    if (cancelResolution) {
+      const summary: ImportSummary = {
+        totalProcessed: total,
+        succeeded: 0,
+        skipped: total,
+        failed: 0,
+        messages: [{
+          mapId: cancelResolution.snapshot.id,
+          level: 'warning',
+          detail: 'Import cancelled after conflict resolution.',
+        }],
+      };
+      const updatedSession: ImportSession = { ...importContext.session, status: 'cancelled', summary };
+      setImportContext({ manifest: importContext.manifest, session: updatedSession });
+      onProgress?.({ stage: 'cancelled', processed: 0, total, summary, message: 'Import cancelled after conflict resolution' });
+      return summary;
+    }
+
+    const unresolved = entries.filter(entry => entry.conflict && !entry.resolution);
+    if (unresolved.length) {
+      throw new Error('Resolve all map conflicts before applying the import.');
+    }
+
+    setImportContext(ctx => ctx ? ({
+      manifest: ctx.manifest,
+      session: { ...ctx.session, status: 'applying' },
+    }) : ctx);
+
+    const summary: ImportSummary = {
+      totalProcessed: total,
+      succeeded: 0,
+      skipped: 0,
+      failed: 0,
+      messages: [],
+    };
+
+    let processed = 0;
+    for (const entry of entries) {
+      onProgress?.({ stage: 'applying', processed, total, entry, message: `Processing ${processed + 1} of ${total}` });
+      const actionForEntry: 'add' | 'overwrite' = entry.conflict ? (entry.resolution?.action === 'overwrite' ? 'overwrite' : 'add') : 'add';
+      const resolvedName = entry.conflict && actionForEntry === 'add' ? entry.resolution?.resolvedName : undefined;
+      try {
+        const graphRecord = await writeImportedGraph(entry, actionForEntry, resolvedName);
+        summary.succeeded += 1;
+        summary.messages.push({
+          mapId: graphRecord.id,
+          level: 'info',
+          detail: actionForEntry === 'overwrite'
+            ? `Overwrote existing map "${entry.snapshot.name}"`
+            : `Imported new map "${graphRecord.name}"`,
+        });
+      } catch (error) {
+        summary.failed += 1;
+        summary.messages.push({
+          mapId: entry.snapshot.id,
+          level: 'error',
+          detail: error instanceof Error ? error.message : 'Import failed due to unknown error.',
+        });
+      }
+      processed += 1;
+    }
+
+    summary.skipped = summary.totalProcessed - (summary.succeeded + summary.failed);
+
+    const status: ImportSession['status'] = summary.failed ? 'failed' : 'completed';
+    const updatedSession: ImportSession = { ...importContext.session, status, summary };
+    setImportContext({ manifest: importContext.manifest, session: updatedSession });
+    await refreshList();
+    if (!summary.failed) {
+      setSelectedLibraryIds([]);
+    }
+    const completionStage: ImportProgressEvent['stage'] = summary.failed ? 'failed' : 'completed';
+    onProgress?.({ stage: completionStage, processed, total, summary, message: summary.failed ? 'Import completed with errors' : 'Import completed successfully' });
+    return summary;
+  }, [importContext, refreshList, setSelectedLibraryIds]);
 
   const newGraph = useCallback(async () => {
     const g = await createGraph('Untitled Map');
@@ -684,6 +956,68 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSelectedNodeId(null);
   }, []);
 
+  // ===== Library selection (Map Library view) =====
+  const replaceLibrarySelection = useCallback((ids: string[]) => {
+    setSelectedLibraryIds(cur => {
+      const next = normalizeLibrarySelection(ids);
+      if (next.length === cur.length && next.every((val, idx) => val === cur[idx])) {
+        return cur;
+      }
+      return next;
+    });
+  }, [normalizeLibrarySelection]);
+
+  const addLibrarySelection = useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    setSelectedLibraryIds(cur => {
+      const next = normalizeLibrarySelection([...cur, ...ids]);
+      if (next.length === cur.length && next.every((val, idx) => val === cur[idx])) {
+        return cur;
+      }
+      return next;
+    });
+  }, [normalizeLibrarySelection]);
+
+  const toggleLibrarySelection = useCallback((id: string) => {
+    if (!id) return;
+    setSelectedLibraryIds(cur => {
+      if (cur.includes(id)) {
+        const next = cur.filter(existing => existing !== id);
+        return next.length === cur.length ? cur : next;
+      }
+      const next = normalizeLibrarySelection([...cur, id]);
+      if (next.length === cur.length && next.every((val, idx) => val === cur[idx])) {
+        return cur;
+      }
+      return next;
+    });
+  }, [normalizeLibrarySelection]);
+
+  const clearLibrarySelection = useCallback(() => {
+    setSelectedLibraryIds(cur => (cur.length ? [] : cur));
+  }, []);
+
+  const exportMaps = useCallback(async (ids: string[], options?: ExportMapsOptions): Promise<ExportArchiveResult> => {
+    const normalized = normalizeLibrarySelection(ids);
+    if (!normalized.length) {
+      throw new Error('Select at least one map to export.');
+    }
+    const snapshots = await getGraphSnapshots(normalized);
+    if (snapshots.length !== normalized.length) {
+      throw new Error('Unable to load one or more maps for export.');
+    }
+    return generateExportArchive(snapshots, {
+      appVersion: APP_VERSION,
+      manifestVersion: EXPORT_MANIFEST_VERSION,
+      notes: options?.notes,
+      fileName: options?.fileName,
+      signal: options?.signal,
+      pauseAutosave: options?.pauseAutosave,
+      resumeAutosave: options?.resumeAutosave,
+      logger: options?.logger,
+    });
+  }, [normalizeLibrarySelection]);
+
   // ===== Marquee (ephemeral) =====
   const beginMarquee = useCallback((x: number, y: number, additive: boolean) => {
     setMarquee({ active: false, startX: x, startY: y, currentX: x, currentY: y, additive });
@@ -1125,10 +1459,14 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph?.id, mutationCounter.current]);
 
+  useEffect(() => {
+    setSelectedLibraryIds(cur => normalizeLibrarySelection(cur));
+  }, [normalizeLibrarySelection]);
+
 
   React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, references, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, selectedReferenceId, selectReference, selectedNodeIds, replaceSelection, addToSelection, toggleSelection, clearSelection, marquee, beginMarquee, updateMarquee, endMarquee, cancelMarquee, activateMarquee, interactionMode, setInteractionMode: setInteractionModeCb, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles, updateNoteFormatting, resetNoteFormatting, createReference, updateReferenceStyle, repositionReference, deleteReference, updateReferenceLabel, toggleReferenceLabelVisibility, overrideNodeBorder, clearNodeBorderOverride, getNodeBorderInfo }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, references, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, selectedReferenceId, selectReference, selectedNodeIds, replaceSelection, addToSelection, toggleSelection, clearSelection, selectedLibraryIds, replaceLibrarySelection, addLibrarySelection, toggleLibrarySelection, clearLibrarySelection, exportMaps, marquee, beginMarquee, updateMarquee, endMarquee, cancelMarquee, activateMarquee, interactionMode, setInteractionMode: setInteractionModeCb, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles, updateNoteFormatting, resetNoteFormatting, createReference, updateReferenceStyle, repositionReference, deleteReference, updateReferenceLabel, toggleReferenceLabelVisibility, overrideNodeBorder, clearNodeBorderOverride, getNodeBorderInfo, importContext, stageImport, resolveImportConflict, finalizeImportSession, clearImportSession }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

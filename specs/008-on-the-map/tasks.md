@@ -9,55 +9,55 @@
 ## Task List
 
 ### Setup & Dependency Preparation
-1. **T001** – *Install ZIP tooling dependency*
-   - Add `jszip` and corresponding type definitions to `package.json`.
-   - Run `npm install` and commit lockfile changes.
-   - Location: `package.json`, `package-lock.json`.
+1. **T001 [X]** – *Install ZIP tooling dependency*
+    - Add `jszip` and ensure type definitions are available (library includes TS types without extra package).
+    - Run `npm install` and commit lockfile changes.
+    - Location: `package.json`, `package-lock.json`.
 
-2. **T002** – *Seed data exports for tests*
-   - Create representative fixture helper for maps used across export/import tests.
-   - Location: `tests/setup/` new fixture module.
+2. **T002 [X]** – *Seed data exports for tests*
+    - Create representative fixture helper for maps used across export/import tests.
+    - Location: `tests/setup/` new fixture module.
 
 ### Contract Tests (TDD First) – Parallelizable
-3. **T003 [P]** – *Write failing contract tests for manifest integrity*
-   - Add tests under `tests/contract/export-manifest.contract.test.ts` covering missing fields, wrong totals, duplicate IDs.
+3. **T003 [P][X]** – *Write failing contract tests for manifest integrity*
+    - Add tests under `tests/contract/export-manifest.contract.test.ts` covering missing fields, wrong totals, duplicate IDs.
 
-4. **T004 [P]** – *Write failing contract tests for import summary*
-   - Add tests under `tests/contract/import-summary.contract.test.ts` verifying totals alignment and cancel warnings.
+4. **T004 [P][X]** – *Write failing contract tests for import summary*
+    - Add tests under `tests/contract/import-summary.contract.test.ts` verifying totals alignment and cancel warnings.
 
 ### Integration Tests (User Scenarios) – Parallelizable
-5. **T005 [P]** – *Export happy-path integration test*
-   - Playwright test `tests/integration/export-multi-map.spec.ts` per quickstart export flow with progress modal assertion.
+5. **T005 [P][X]** – *Export happy-path integration test*
+    - Playwright test `tests/integration/export-multi-map.spec.ts` per quickstart export flow with progress modal assertion.
 
-6. **T006 [P]** – *Import restore integration test*
-   - Playwright test `tests/integration/import-restore.spec.ts` validating reappearance of deleted map and logs.
+6. **T006 [P][X]** – *Import restore integration test*
+    - Playwright test `tests/integration/import-restore.spec.ts` validating reappearance of deleted map and logs.
 
-7. **T007 [P]** – *Conflict prompt integration test*
-   - Playwright test `tests/integration/import-conflict-prompt.spec.ts` covering Add/Overwrite/Cancel branches.
+7. **T007 [P][X]** – *Conflict prompt integration test*
+    - Playwright test `tests/integration/import-conflict-prompt.spec.ts` covering Add/Overwrite/Cancel branches.
 
-8. **T008 [P]** – *Malformed ZIP failure integration test*
-   - Playwright test `tests/integration/import-malformed.spec.ts` ensuring validation failure handling.
+8. **T008 [P][X]** – *Malformed ZIP failure integration test*
+    - Playwright test `tests/integration/import-malformed.spec.ts` ensuring validation failure handling.
 
-9. **T009 [P]** – *Migration success integration test*
-   - Playwright test `tests/integration/import-migration.spec.ts` covering schema downgrade + migration messaging.
+9. **T009 [P][X]** – *Migration success integration test*
+    - Playwright test `tests/integration/import-migration.spec.ts` covering schema downgrade + migration messaging.
 
 ### Domain & Persistence Logic
-10. **T010** – *Implement ExportManifest & MapSnapshot serializers*
+10. **T010 [X]** – *Implement ExportManifest & MapSnapshot serializers*
     - Update `src/lib/export.ts` to build manifest + map payload entries using JSZip.
     - Ensure manifest validation helper exported for tests.
 
-11. **T011** – *Implement export ZIP generator*
+11. **T011 [X]** – *Implement export ZIP generator*
     - Integrate JSZip bundling pipeline, return Blob for download.
     - Pause autosave during export and log duration.
 
-12. **T012** – *Implement import ZIP validator & parser*
+12. **T012 [X]** – *Implement import ZIP validator & parser*
     - Add helper in `src/lib/export.ts` (or new module) to inspect ZIP, parse manifest, stage `ImportSession` data structures.
 
-13. **T013** – *Implement schema migration helper*
+13. **T013 [X]** – *Implement schema migration helper*
     - Provide function to upgrade older manifest/map payloads before applying.
     - Update tests to cover migration success/failure.
 
-14. **T014** – *Persist ImportSession outcomes*
+14. **T014 [X]** – *Persist ImportSession outcomes*
     - Extend `src/state/graph-store.tsx` (or dedicated store) to track sessions, apply resolutions, and update IndexedDB.
 
 ### UI & Interaction Layer
