@@ -27,10 +27,9 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
         ta.focus();
         const len = draft.length;
         ta.setSelectionRange(len, len);
-        autoResize();
       }
     }
-  }, [editing]);
+  }, [editing, draft.length]);
   // Sync incoming text when not editing
   useEffect(() => { if (!editing) setDraft(text); }, [text, editing]);
 
@@ -40,12 +39,6 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
   }, [draft, text, id, updateNodeText, stopEditing]);
   const cancel = useCallback(() => { setDraft(text); stopEditing(); }, [text, stopEditing]);
 
-  function autoResize() {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 300) + 'px'; // soft max height 300px
-  }
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
@@ -54,14 +47,11 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
       e.preventDefault();
       cancel();
     }
-    // Shift+Enter: allow newline default (handled by browser) then resize next frame
-    requestAnimationFrame(autoResize);
   }
 
   function onChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const next = e.target.value.slice(0,255); // enforce limit including newlines
     setDraft(next);
-    requestAnimationFrame(autoResize);
   }
 
   const record = React.useMemo(() => nodes.find((n: any) => n.id === id), [nodes, id]);
@@ -109,25 +99,49 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
           background,
           padding: 4,
           borderRadius: 4,
-          border: '1px solid rgba(255,255,255,0.15)', // subtle inner stroke (the previous border - "red" in screenshot)
-          boxSizing: 'border-box'
+          border: '1px solid rgba(255,255,255,0.15)',
+          boxSizing: 'border-box',
+          position: 'relative'
         }}
         onDoubleClick={(e) => { e.stopPropagation(); if (!editing) startEditing(id); }}
       >
-      {editing ? (
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={onChange}
-          onBlur={commit}
-          onKeyDown={onKey}
-          aria-label="Edit thought text"
-          rows={1}
-          style={{ width: '100%', resize: 'none', overflow: 'hidden', background:'var(--mf-editor-bg)', color:'var(--mf-editor-text)', border:'none', outline:'none', fontFamily:'inherit', fontSize:'var(--font-size-node)', lineHeight:'var(--line-height-node)', textAlign:'center' }}
-        />
-      ) : (
-        <span style={{ whiteSpace:'pre-wrap', display:'block', textAlign:'center' }}>{text || 'New Thought'}</span>
-      )}
+        <span
+          style={{ whiteSpace:'pre-wrap', display:'block', textAlign:'center', visibility: editing ? 'hidden' : 'visible' }}
+        >
+          {(editing ? draft : text) || 'New Thought'}
+        </span>
+        {editing && (
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={onChange}
+            onBlur={commit}
+            onKeyDown={onKey}
+            aria-label="Edit thought text"
+            style={{
+              position: 'absolute',
+              top: 4,
+              right: 4,
+              bottom: 4,
+              left: 4,
+              width: 'auto',
+              height: 'auto',
+              resize: 'none',
+              overflow: 'hidden',
+              background: 'var(--mf-editor-bg)',
+              color: 'var(--mf-editor-text)',
+              border: 'none',
+              outline: 'none',
+              boxSizing: 'border-box',
+              padding: 0,
+              margin: 0,
+              fontFamily: 'inherit',
+              fontSize: 'var(--font-size-node)',
+              lineHeight: 'var(--line-height-node)',
+              textAlign: 'center'
+            }}
+          />
+        )}
       </div>
       {selected && !editing && (
         <button
