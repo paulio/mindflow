@@ -110,6 +110,7 @@ const THUMBNAIL_CONTAINER_STYLE: React.CSSProperties = {
   overflow: 'hidden',
   background: 'rgba(255,255,255,0.04)',
   border: '1px solid rgba(255,255,255,0.06)',
+  cursor: 'pointer',
 };
 
 const THUMBNAIL_IMAGE_STYLE: React.CSSProperties = {
@@ -321,10 +322,41 @@ const LibraryMapCard: React.FC<LibraryMapCardProps> = ({ graph, selected, onTogg
         ? 'Thumbnail refresh in progress'
         : 'Retry limit reached'
       : 'Retry thumbnail refresh';
+  const thumbnailContainerStyle = useMemo<React.CSSProperties>(() => ({
+    ...THUMBNAIL_CONTAINER_STYLE,
+  }), []);
+
+  const handleThumbnailClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented) return;
+    if (event.target instanceof HTMLElement) {
+      const interactiveRoot = event.target.closest('button, a, input, label');
+      if (interactiveRoot && interactiveRoot !== event.currentTarget) {
+        return;
+      }
+    }
+    onOpen();
+  }, [onOpen]);
+
+  const handleThumbnailKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onOpen();
+    }
+  }, [onOpen]);
 
   return (
     <li style={CARD_STYLE}>
-      <div style={THUMBNAIL_CONTAINER_STYLE}>
+      <div
+        style={thumbnailContainerStyle}
+        role="button"
+        tabIndex={0}
+        aria-label={`Open ${graph.name}`}
+        onClick={handleThumbnailClick}
+        onKeyDown={handleThumbnailKeyDown}
+      >
         {thumbnailUrl ? (
           <img src={thumbnailUrl} alt={`Thumbnail of ${graph.name}`} style={THUMBNAIL_IMAGE_STYLE} />
         ) : isLoading ? (
@@ -342,7 +374,13 @@ const LibraryMapCard: React.FC<LibraryMapCardProps> = ({ graph, selected, onTogg
         {showRetry && (
           <button
             type="button"
-            onClick={() => { if (!retryDisabled) onRefresh(); }}
+            onClick={event => {
+              event.stopPropagation();
+              if (!retryDisabled) onRefresh();
+            }}
+            onKeyDown={event => {
+              event.stopPropagation();
+            }}
             disabled={retryDisabled}
             style={{
               ...THUMBNAIL_RETRY_STYLE,
