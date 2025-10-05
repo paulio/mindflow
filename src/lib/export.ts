@@ -704,6 +704,8 @@ import JSZip from 'jszip';
 import { NodeRecord, EdgeRecord, GraphRecord, PersistenceSnapshot, ReferenceConnectionRecord } from './types';
 import { findRootNodeId } from './hierarchy';
 import { resolveNodeBackground } from './background-precedence';
+import { putThumbnail } from './indexeddb';
+import { THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, ThumbnailTrigger, logThumbnailRefreshEvent } from './thumbnails';
 
 function escapeMarkdown(text: string): string {
   // Replace newline sequences with a single space, then collapse runs of spaces to a single space.
@@ -803,7 +805,17 @@ function resolveThemeFromDOM(): CanvasThemeLike {
   };
 }
 
-export async function exportGraphAsPng(graph: GraphRecord, nodes: NodeRecord[], edges: EdgeRecord[]): Promise<Blob | null> {
+export interface ExportGraphAsPngOptions {
+  persistThumbnail?: boolean;
+  trigger?: ThumbnailTrigger;
+}
+
+export async function exportGraphAsPng(
+  graph: GraphRecord,
+  nodes: NodeRecord[],
+  edges: EdgeRecord[],
+  options: ExportGraphAsPngOptions = {},
+): Promise<Blob | null> {
   if (!nodes.length) return null;
   // Approx node dimensions (current styling): width dynamic; we'll measure longest text length
   const theme = resolveThemeFromDOM();
@@ -954,7 +966,107 @@ export async function exportGraphAsPng(graph: GraphRecord, nodes: NodeRecord[], 
       ty += lineHeight;
     }
   }
-  return await new Promise(resolve => canvas.toBlob(b => resolve(b), 'image/png'));
+
+  try {
+    const blob = await canvasToBlob(canvas);
+    if (options.persistThumbnail && graph.id) {
+      const trigger = options.trigger ?? 'export';
+      await persistThumbnailFromCanvas(canvas, { mapId: graph.id, trigger });
+    }
+    return blob;
+  } catch {
+    return null;
+  }
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(new Error('Failed to serialize canvas to PNG'));
+    }, 'image/png');
+  });
+}
+
+export interface PersistThumbnailOptions {
+  mapId: string;
+  trigger: ThumbnailTrigger;
+}
+
+export async function persistThumbnailFromCanvas(
+  sourceCanvas: HTMLCanvasElement,
+  options: PersistThumbnailOptions,
+): Promise<void> {
+  if (!options.mapId) return;
+  if (!sourceCanvas.width || !sourceCanvas.height) return;
+
+  const start = nowMs();
+  try {
+    const thumbnailCanvas = document.createElement('canvas');
+    thumbnailCanvas.width = THUMBNAIL_WIDTH;
+    thumbnailCanvas.height = THUMBNAIL_HEIGHT;
+    const ctx = thumbnailCanvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Unable to acquire 2D context for thumbnail canvas');
+    }
+
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT);
+
+    const scale = Math.min(
+      THUMBNAIL_WIDTH / sourceCanvas.width,
+      THUMBNAIL_HEIGHT / sourceCanvas.height,
+    );
+    const drawWidth = sourceCanvas.width * scale;
+    const drawHeight = sourceCanvas.height * scale;
+    const dx = (THUMBNAIL_WIDTH - drawWidth) / 2;
+    const dy = (THUMBNAIL_HEIGHT - drawHeight) / 2;
+
+    ctx.drawImage(
+      sourceCanvas,
+      0,
+      0,
+      sourceCanvas.width,
+      sourceCanvas.height,
+      dx,
+      dy,
+      drawWidth,
+      drawHeight,
+    );
+
+    const blob = await canvasToBlob(thumbnailCanvas);
+    await putThumbnail({
+      mapId: options.mapId,
+      blob,
+      trigger: options.trigger,
+      sourceExportAt: new Date().toISOString(),
+      status: 'ready',
+      retryCount: 0,
+    });
+
+    const elapsed = nowMs() - start;
+    logThumbnailRefreshEvent({
+      mapId: options.mapId,
+      trigger: options.trigger,
+      outcome: 'success',
+      durationMs: elapsed,
+      retryCount: 0,
+      failureReason: null,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    const elapsed = nowMs() - start;
+    logThumbnailRefreshEvent({
+      mapId: options.mapId,
+      trigger: options.trigger,
+      outcome: 'failure',
+      durationMs: elapsed,
+      retryCount: 0,
+      failureReason: error instanceof Error ? error.message : 'thumbnail-persist-error',
+      timestamp: new Date().toISOString(),
+    });
+    console.warn('Failed to persist export thumbnail', error);
+  }
 }
 
 export function triggerDownload(filename: string, blob: Blob) {

@@ -1,11 +1,35 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import pkg from '../../package.json';
-import { createGraph, loadGraph, saveNodes, saveEdges, deleteGraph, updateGraphMeta, listGraphs, cloneGraph, persistNodeDeletion, saveReferences, deleteReferences, initDB, generateId, getGraphSnapshots } from '../lib/indexeddb';
+import {
+  createGraph,
+  loadGraph,
+  saveNodes,
+  saveEdges,
+  deleteGraph,
+  updateGraphMeta,
+  listGraphs,
+  cloneGraph,
+  persistNodeDeletion,
+  saveReferences,
+  deleteReferences,
+  initDB,
+  generateId,
+  getGraphSnapshots,
+  getGraphSnapshot,
+  putThumbnail,
+  incrementThumbnailRetry,
+  listThumbnailEntries,
+  deleteThumbnail,
+} from '../lib/indexeddb';
 import { createNode, createEdge } from '../lib/graph-domain';
 import { computeInitialBorderColour, BORDER_COLOUR_PALETTE, ROOT_FALLBACK } from '../lib/node-border-palette';
-import { NodeRecord, EdgeRecord, GraphRecord, ReferenceConnectionRecord } from '../lib/types';
+import { NodeRecord, EdgeRecord, GraphRecord, ReferenceConnectionRecord, PersistenceSnapshot } from '../lib/types';
 import { events } from '../lib/events';
 import { pushUndo, resetUndoHistory } from '../hooks/useUndoRedo';
+import { generateThumbnailFromSnapshot } from '../lib/thumbnail-generator';
+import type { ThumbnailTrigger, ThumbnailStatus, ThumbnailCacheEntry } from '../lib/thumbnails';
+import { logThumbnailRefreshEvent } from '../lib/thumbnails';
+import { useAutosave } from '../hooks/useAutosave';
 import {
   inspectImportArchive,
   ImportArchiveInspection,
@@ -37,7 +61,50 @@ export interface ImportProgressEvent {
 type ViewMode = 'library' | 'canvas';
 interface GraphState { graph: GraphRecord | null; nodes: NodeRecord[]; edges: EdgeRecord[]; graphs: GraphRecord[]; view: ViewMode; references: ReferenceConnectionRecord[]; }
 
+interface ThumbnailStatusInfo {
+  status: ThumbnailStatus;
+  updatedAt: string | null;
+  lastAccessed: string | null;
+  retryCount: number;
+  failureReason: string | null;
+  trigger: ThumbnailTrigger | null;
+  pending: boolean;
+  durationMs?: number;
+}
+
+const THUMBNAIL_RETRY_LIMIT = 1;
+
+const DEFAULT_THUMBNAIL_STATUS: ThumbnailStatusInfo = {
+  status: 'queued',
+  updatedAt: null,
+  lastAccessed: null,
+  retryCount: 0,
+  failureReason: null,
+  trigger: null,
+  pending: false,
+};
+
+function createStatusFromEntry(entry: ThumbnailCacheEntry): ThumbnailStatusInfo {
+  return {
+    status: entry.status,
+    updatedAt: entry.updatedAt,
+    lastAccessed: entry.lastAccessed,
+    retryCount: entry.retryCount,
+    failureReason: entry.failureReason,
+    trigger: entry.trigger,
+    pending: false,
+  };
+}
+
+function nowMs() {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
+  }
+  return Date.now();
+}
+
 interface GraphContext extends GraphState {
+  currentGraph: GraphRecord | null;
   newGraph(): Promise<void>;
   selectGraph(id: string): Promise<void>;
   openLibrary(): void;
@@ -113,6 +180,9 @@ interface GraphContext extends GraphState {
   toggleLibrarySelection(id: string): void;
   clearLibrarySelection(): void;
   exportMaps(ids: string[], options?: ExportMapsOptions): Promise<ExportArchiveResult>;
+  thumbnailStatuses: Record<string, ThumbnailStatusInfo>;
+  requestThumbnailRefresh(mapId: string, trigger?: ThumbnailTrigger): Promise<void>;
+  thumbnailRetryLimit: number;
 }
 
 const Ctx = createContext<GraphContext | null>(null);
@@ -125,7 +195,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [references, setReferences] = useState<ReferenceConnectionRecord[]>([]);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>('library');
-  const [pendingChanges, setPendingChanges] = useState<boolean>(false); // placeholder (would toggle on edits & clear on autosave success)
+  const [pendingChanges, _setPendingChanges] = useState<boolean>(false); // placeholder (would toggle on edits & clear on autosave success)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [marquee, setMarquee] = useState<GraphContext['marquee']>(null);
@@ -135,7 +205,16 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [activeTool, setActiveTool] = useState<'note' | 'rect' | null>(null);
   const [importContext, setImportContext] = useState<ImportArchiveInspection | null>(null);
   const [selectedLibraryIds, setSelectedLibraryIds] = useState<string[]>([]);
+  const [thumbnailStatuses, setThumbnailStatuses] = useState<Record<string, ThumbnailStatusInfo>>({});
   const mutationCounter = useRef(0);
+  const thumbnailStatusesRef = useRef<Record<string, ThumbnailStatusInfo>>({});
+  const refreshQueue = useRef(new Map<string, Promise<void>>());
+  const thumbnailRetryLimit = THUMBNAIL_RETRY_LIMIT;
+  const autosaveToken = graph ? `${graph.id}:${mutationCounter.current}` : null;
+
+  useEffect(() => {
+    thumbnailStatusesRef.current = thumbnailStatuses;
+  }, [thumbnailStatuses]);
 
   const normalizeLibrarySelection = useCallback((ids: string[]) => {
     if (!ids.length) return ids;
@@ -159,19 +238,172 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return next;
   }, [graphs]);
 
-  async function refreshList() {
+  const refreshList = useCallback(async () => {
     try {
       if (typeof window === 'undefined') return; // test/headless guard
       setGraphs(await listGraphs());
     } catch { /* ignore listing errors in headless */ }
-  }
+  }, []);
 
-  async function persistGraphSnapshotRecord(
+  const snapshotForMap = useCallback(async (mapId: string): Promise<PersistenceSnapshot | null> => {
+    if (!mapId) return null;
+    if (graph && graph.id === mapId) {
+      const graphClone: GraphRecord = { ...graph };
+      const nodesClone = nodes.map(node => ({ ...node })) as NodeRecord[];
+      const edgesClone = edges.map(edge => ({ ...edge })) as EdgeRecord[];
+      const referencesClone = references.map(ref => ({ ...ref })) as ReferenceConnectionRecord[];
+      return {
+        graph: graphClone,
+        nodes: nodesClone,
+        edges: edgesClone,
+        references: referencesClone,
+      };
+    }
+    try {
+      return await getGraphSnapshot(mapId);
+    } catch {
+      return null;
+    }
+  }, [graph, nodes, edges, references]);
+
+  const requestThumbnailRefresh = useCallback(async (mapId: string, trigger: ThumbnailTrigger = 'export:complete') => {
+    if (!mapId) return;
+
+    const existingStatus = thumbnailStatusesRef.current[mapId];
+    if (existingStatus?.pending) {
+      return refreshQueue.current.get(mapId);
+    }
+    if (existingStatus?.status === 'failed' && existingStatus.retryCount >= thumbnailRetryLimit) {
+      return;
+    }
+
+    if (refreshQueue.current.has(mapId)) {
+      return refreshQueue.current.get(mapId);
+    }
+
+    const job = (async () => {
+      const start = nowMs();
+      setThumbnailStatuses(prev => ({
+        ...prev,
+        [mapId]: {
+          ...(prev[mapId] ?? DEFAULT_THUMBNAIL_STATUS),
+          status: 'refreshing',
+          trigger,
+          pending: true,
+          failureReason: null,
+        },
+      }));
+
+      try {
+        const snapshot = await snapshotForMap(mapId);
+        if (!snapshot) {
+          throw new Error('Thumbnail refresh failed: snapshot unavailable');
+        }
+
+        const generation = await generateThumbnailFromSnapshot(snapshot);
+        const result = await putThumbnail({
+          mapId,
+          blob: generation.blob,
+          trigger,
+          sourceExportAt: generation.sourceExportAt,
+          status: 'ready',
+          retryCount: 0,
+        });
+
+        setThumbnailStatuses(prev => {
+          const next = { ...prev };
+          next[mapId] = {
+            status: result.entry.status,
+            updatedAt: result.entry.updatedAt,
+            lastAccessed: result.entry.lastAccessed,
+            retryCount: result.entry.retryCount,
+            failureReason: null,
+            trigger: result.entry.trigger,
+            pending: false,
+            durationMs: generation.durationMs,
+          };
+          if (result.evicted.length) {
+            for (const evicted of result.evicted) {
+              if (evicted.mapId !== mapId) {
+                delete next[evicted.mapId];
+              }
+            }
+          }
+          return next;
+        });
+
+        logThumbnailRefreshEvent({
+          mapId,
+          trigger,
+          outcome: 'success',
+          durationMs: generation.durationMs,
+          retryCount: 0,
+          failureReason: null,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        const elapsed = nowMs() - start;
+        const message = error instanceof Error ? error.message : 'Unknown thumbnail refresh error';
+        const updated = await incrementThumbnailRetry(mapId, message);
+
+        setThumbnailStatuses(prev => {
+          const next = { ...prev };
+          const base = updated ? createStatusFromEntry(updated) : DEFAULT_THUMBNAIL_STATUS;
+          const retryCount = updated?.retryCount ?? Math.min((prev[mapId]?.retryCount ?? 0) + 1, thumbnailRetryLimit);
+          next[mapId] = {
+            ...base,
+            status: 'failed',
+            failureReason: message,
+            pending: false,
+            trigger,
+            retryCount,
+            durationMs: elapsed,
+            updatedAt: updated?.updatedAt ?? new Date().toISOString(),
+          };
+          return next;
+        });
+
+        logThumbnailRefreshEvent({
+          mapId,
+          trigger,
+          outcome: 'failure',
+          durationMs: elapsed,
+          retryCount: updated?.retryCount ?? Math.min((thumbnailStatusesRef.current[mapId]?.retryCount ?? 0) + 1, thumbnailRetryLimit),
+          failureReason: message,
+          timestamp: new Date().toISOString(),
+        });
+      } finally {
+        refreshQueue.current.delete(mapId);
+      }
+    })();
+
+    refreshQueue.current.set(mapId, job);
+    return job;
+  }, [snapshotForMap, thumbnailRetryLimit]);
+
+  const { pause: pauseAutosaveInternal, resume: resumeAutosaveInternal } = useAutosave<string>({
+    data: autosaveToken,
+    debounceMs: 500,
+    idleMs: 10000,
+    save: async () => { /* persistence handled by targeted mutations */ },
+    onIdle: async (token) => {
+      const targetId = token ? token.split(':')[0] : graph?.id ?? null;
+      if (!targetId) return;
+      await requestThumbnailRefresh(targetId, 'idle');
+    },
+    onBeforeUnload: () => {
+      const targetId = graph?.id ?? null;
+      if (!targetId) return;
+      return requestThumbnailRefresh(targetId, 'close');
+    },
+  });
+
+  const persistGraphSnapshotRecord = useCallback(async (
     graphRecord: GraphRecord,
     nodes: NodeRecord[],
     edges: EdgeRecord[],
     references: ReferenceConnectionRecord[],
-  ) {
+  ) => {
     const db = await initDB();
     const stores: string[] = ['graphs', 'graphNodes', 'graphEdges'];
     if (db.objectStoreNames.contains('graphReferences')) stores.push('graphReferences');
@@ -192,13 +424,13 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
     await tx.done;
-  }
+  }, []);
 
-  async function writeImportedGraph(
+  const writeImportedGraph = useCallback(async (
     entry: ImportEntry,
     action: 'add' | 'overwrite',
     resolvedName?: string,
-  ): Promise<GraphRecord> {
+  ): Promise<GraphRecord> => {
     const now = new Date().toISOString();
     if (action === 'overwrite') {
       const targetId = entry.snapshot.id;
@@ -238,7 +470,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const references = entry.payload.references.map<ReferenceConnectionRecord>(reference => ({ ...reference, graphId: newId }));
     await persistGraphSnapshotRecord(graphRecord, nodes, edges, references);
     return graphRecord;
-  }
+  }, [persistGraphSnapshotRecord]);
 
   const stageImport = useCallback(async (
     source: Blob | ArrayBuffer | ArrayBufferView | File,
@@ -373,7 +605,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const completionStage: ImportProgressEvent['stage'] = summary.failed ? 'failed' : 'completed';
     onProgress?.({ stage: completionStage, processed, total, summary, message: summary.failed ? 'Import completed with errors' : 'Import completed successfully' });
     return summary;
-  }, [importContext, refreshList, setSelectedLibraryIds]);
+  }, [importContext, refreshList, setSelectedLibraryIds, writeImportedGraph]);
 
   const newGraph = useCallback(async () => {
     const g = await createGraph('Untitled Map');
@@ -402,7 +634,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (typeof window !== 'undefined') {
       setView('canvas');
     }
-  }, []);
+  }, [refreshList]);
 
   const selectGraph = useCallback(async (id: string) => {
     const snap = await loadGraph(id);
@@ -456,6 +688,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const openLibrary = useCallback(() => {
+    const activeGraphId = graph?.id ?? null;
     // Guard: if editing in progress warn
     if (editingNodeId) {
       const proceed = window.confirm('You have an edit in progress. Leave and discard focus?');
@@ -463,7 +696,10 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setEditingNodeId(null);
     }
     setView('library');
-  }, [editingNodeId]);
+    if (activeGraphId) {
+      void requestThumbnailRefresh(activeGraphId, 'library:open');
+    }
+  }, [editingNodeId, graph, requestThumbnailRefresh]);
 
   const renameGraph = useCallback(async (name: string) => {
     if (!graph) return;
@@ -471,13 +707,25 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setGraph({ ...graph, name, lastModified: new Date().toISOString() });
     events.emit('graph:renamed', { graphId: graph.id, name });
     await refreshList();
-  }, [graph]);
+  }, [graph, refreshList]);
 
   const removeGraph = useCallback( async (id: string) => {
     await deleteGraph(id);
+    try {
+      await deleteThumbnail(id);
+    } catch {
+      /* ignore thumbnail deletion errors */
+    }
+    refreshQueue.current.delete(id);
+    setThumbnailStatuses(prev => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     if (graph?.id === id) { setGraph(null); setNodes([]); setEdges([]); }
     await refreshList();
-  }, [graph]);
+  }, [graph, refreshList]);
 
   const addNode = useCallback((x: number, y: number) : NodeRecord | null => {
     if (!graph) return null;
@@ -539,7 +787,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const parentNode = nodes.find(n => n.id === sourceNodeId) as NodeRecord | undefined;
     let created: NodeRecord | null = null;
     try {
-      // eslint-disable-next-line no-console
       console.debug('[graph-store] addConnectedNode invoked', { sourceNodeId, x, y, sourceHandleId, targetHandleId });
       created = createNode({ graphId: graph.id, x, y });
       // Determine depth using current levels map
@@ -558,7 +805,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setEdges(es => [...es, edge]);
   mutationCounter.current++;
       // Debug visibility: log creation so we can confirm in browser console.
-      // eslint-disable-next-line no-console
       console.debug('[graph-store] addConnectedNode created node+edge', { node: created.id, edge: edge.id, sourceNodeId, targetNodeId: created.id });
       events.emit('node:created', { graphId: graph.id, nodeId: created.id });
       events.emit('edge:created', { graphId: graph.id, edgeId: edge.id });
@@ -591,7 +837,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       });
       return created;
-    } catch (err) {
+    } catch {
       // rollback not needed since we only mutate state after both creations succeed; if partial happened, remove.
       return null;
     }
@@ -1006,17 +1252,28 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (snapshots.length !== normalized.length) {
       throw new Error('Unable to load one or more maps for export.');
     }
-    return generateExportArchive(snapshots, {
+    const pause = options?.pauseAutosave ?? pauseAutosaveInternal;
+    const resume = options?.resumeAutosave ?? resumeAutosaveInternal;
+    if (pause) pause();
+    try {
+      const archive = await generateExportArchive(snapshots, {
       appVersion: APP_VERSION,
       manifestVersion: EXPORT_MANIFEST_VERSION,
       notes: options?.notes,
       fileName: options?.fileName,
       signal: options?.signal,
-      pauseAutosave: options?.pauseAutosave,
-      resumeAutosave: options?.resumeAutosave,
-      logger: options?.logger,
-    });
-  }, [normalizeLibrarySelection]);
+        pauseAutosave: pause,
+        resumeAutosave: resume,
+        logger: options?.logger,
+      });
+      for (const mapId of normalized) {
+        void requestThumbnailRefresh(mapId, 'export:complete');
+      }
+      return archive;
+    } finally {
+      if (resume) resume();
+    }
+  }, [normalizeLibrarySelection, pauseAutosaveInternal, resumeAutosaveInternal, requestThumbnailRefresh]);
 
   // ===== Marquee (ephemeral) =====
   const beginMarquee = useCallback((x: number, y: number, additive: boolean) => {
@@ -1214,7 +1471,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setView('canvas');
       setSelectedNodeId(null);
     }
-  }, [graph]);
+  }, [graph, refreshList]);
 
   const deleteNode = useCallback((nodeId: string) => {
     if (!graph) return;
@@ -1349,7 +1606,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const nodeSnapshot = { ...node } as NodeRecord;
     const removedEdgesFull = edges.filter(e => e.sourceNodeId === nodeId || e.targetNodeId === nodeId);
     setNodes(ns => ns.filter(n => n.id !== nodeId));
-    setEdges(es => [...remainingEdges, ...newEdges]);
+  setEdges(() => [...remainingEdges, ...newEdges]);
     mutationCounter.current++;
     if (selectedNodeId === nodeId) setSelectedNodeId(null);
     if (editingNodeId === nodeId) setEditingNodeId(null);
@@ -1463,10 +1720,34 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSelectedLibraryIds(cur => normalizeLibrarySelection(cur));
   }, [normalizeLibrarySelection]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const entries = await listThumbnailEntries();
+        if (cancelled) return;
+        setThumbnailStatuses(prev => {
+          const next = { ...prev };
+          for (const entry of entries) {
+            const existing = prev[entry.mapId];
+            if (existing?.pending) continue;
+            next[entry.mapId] = createStatusFromEntry(entry);
+          }
+          return next;
+        });
+      } catch {
+        /* ignore seed errors */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  React.useEffect(() => { refreshList(); }, []);
 
-  return <Ctx.Provider value={{ graph, nodes, edges, graphs, view, references, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, selectedReferenceId, selectReference, selectedNodeIds, replaceSelection, addToSelection, toggleSelection, clearSelection, selectedLibraryIds, replaceLibrarySelection, addLibrarySelection, toggleLibrarySelection, clearLibrarySelection, exportMaps, marquee, beginMarquee, updateMarquee, endMarquee, cancelMarquee, activateMarquee, interactionMode, setInteractionMode: setInteractionModeCb, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles, updateNoteFormatting, resetNoteFormatting, createReference, updateReferenceStyle, repositionReference, deleteReference, updateReferenceLabel, toggleReferenceLabelVisibility, overrideNodeBorder, clearNodeBorderOverride, getNodeBorderInfo, importContext, stageImport, resolveImportConflict, finalizeImportSession, clearImportSession }}>{children}</Ctx.Provider>;
+  React.useEffect(() => { refreshList(); }, [refreshList]);
+
+  return <Ctx.Provider value={{ graph, currentGraph: graph, nodes, edges, graphs, view, references, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, selectedReferenceId, selectReference, selectedNodeIds, replaceSelection, addToSelection, toggleSelection, clearSelection, selectedLibraryIds, replaceLibrarySelection, addLibrarySelection, toggleLibrarySelection, clearLibrarySelection, exportMaps, marquee, beginMarquee, updateMarquee, endMarquee, cancelMarquee, activateMarquee, interactionMode, setInteractionMode: setInteractionModeCb, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles, updateNoteFormatting, resetNoteFormatting, createReference, updateReferenceStyle, repositionReference, deleteReference, updateReferenceLabel, toggleReferenceLabelVisibility, overrideNodeBorder, clearNodeBorderOverride, getNodeBorderInfo, importContext, stageImport, resolveImportConflict, finalizeImportSession, clearImportSession, thumbnailStatuses, requestThumbnailRefresh, thumbnailRetryLimit }}>{children}</Ctx.Provider>;
 };
 
 export function useGraph() {

@@ -2,3 +2,64 @@
 /* Global styles */
 html,body,#root { height:100%; margin:0; font-family: system-ui, sans-serif; }
 body { background: var(--color-bg); color: var(--color-text); }
+
+@keyframes mf-shimmer {
+	0% {
+		background-position: -200px 0;
+	}
+	100% {
+		background-position: 200px 0;
+	}
+}
+
+.mf-thumbnail-skeleton {
+	width: 100%;
+	height: 100%;
+	background: linear-gradient(90deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.08) 100%);
+	background-size: 200% 100%;
+	animation: mf-shimmer 1.4s linear infinite;
+}
+
+.mf-thumbnail-placeholder {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.08));
+	color: rgba(255,255,255,0.6);
+	font-size: 13px;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.mf-thumbnail-status-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	padding: 2px 8px;
+	border-radius: 999px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+	background: rgba(255,255,255,0.08);
+	color: rgba(255,255,255,0.8);
+}
+
+.mf-thumbnail-status-badge[data-state="loading"],
+.mf-thumbnail-status-badge[data-state="queued"] {
+	background: rgba(79, 157, 255, 0.15);
+	color: #8fc5ff;
+}
+
+.mf-thumbnail-status-badge[data-state="failed"] {
+	background: rgba(255, 131, 137, 0.16);
+	color: #ff9fa3;
+}
+
+.mf-thumbnail-status-badge[data-state="ready"] {
+	background: rgba(88, 189, 125, 0.16);
+	color: #9fe2b3;
+}

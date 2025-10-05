@@ -1,4 +1,8 @@
 // Simple typed event bus based on contracts/events.md
+import type { ThumbnailCacheEntry } from '../../specs/009-the-home-library/contracts/thumbnail-cache-entry.schema';
+import type { ThumbnailRefreshEvent } from '../../specs/009-the-home-library/contracts/thumbnail-refresh-event.schema';
+import { ThumbnailRefreshEventSchema, createThumbnailRefreshLogContext } from '../../specs/009-the-home-library/contracts/thumbnail-refresh-event.schema';
+
 export type EventName =
   | 'graph:created'
   | 'graph:loaded'
@@ -30,7 +34,9 @@ export type EventName =
   | 'reference:repositioned'
   | 'reference:duplicateBlocked'
   | 'reference:labelChanged'
-  | 'reference:labelVisibilityChanged';
+  | 'reference:labelVisibilityChanged'
+  | 'telemetry:thumbnail'
+  | 'telemetry:thumbnailEvicted';
 
 export interface EventPayloads {
   'graph:created': { graphId: string };
@@ -62,6 +68,15 @@ export interface EventPayloads {
   'reference:duplicateBlocked': { sourceNodeId: string; targetNodeId: string; style: string };
   'reference:labelChanged': { id: string; label: string };
   'reference:labelVisibilityChanged': { id: string; hidden: boolean };
+  'telemetry:thumbnail': ThumbnailRefreshEvent;
+  'telemetry:thumbnailEvicted': ThumbnailEvictionTelemetry;
+}
+
+export interface ThumbnailEvictionTelemetry {
+  evicted: ThumbnailCacheEntry[];
+  totalBytes: number;
+  quotaBytes: number;
+  timestamp: string;
 }
 
 type Handler<E extends EventName> = (payload: EventPayloads[E]) => void;
@@ -86,3 +101,34 @@ class EventBus {
 }
 
 export const events = new EventBus();
+
+export function emitThumbnailRefreshEvent(event: ThumbnailRefreshEvent) {
+  try {
+    const parsed = ThumbnailRefreshEventSchema.parse(event);
+    const context = createThumbnailRefreshLogContext(parsed);
+    const logger = context.level === 'error' ? console.error : console.info;
+    logger(context.message, context.payload);
+    events.emit('telemetry:thumbnail', parsed);
+  } catch (error) {
+    console.warn('Failed to emit thumbnail refresh event', error);
+  }
+}
+
+export function emitThumbnailEvictionEvent(details: {
+  evicted: ThumbnailCacheEntry[];
+  totalBytes: number;
+  quotaBytes: number;
+}) {
+  if (!details.evicted.length) return;
+  const payload: ThumbnailEvictionTelemetry = {
+    evicted: details.evicted,
+    totalBytes: details.totalBytes,
+    quotaBytes: details.quotaBytes,
+    timestamp: new Date().toISOString(),
+  };
+  const env = (import.meta as unknown as { env?: { DEV?: boolean } }).env;
+  if (env?.DEV) {
+    console.warn('[telemetry] thumbnail eviction', payload);
+  }
+  events.emit('telemetry:thumbnailEvicted', payload);
+}
