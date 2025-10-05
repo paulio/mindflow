@@ -86,4 +86,11 @@ export interface PersistenceSnapshot {
   references?: ReferenceConnectionRecord[]; // optional for backward compatibility
 }
 
-export type IDBStores = 'graphs' | 'graphNodes' | 'graphEdges' | 'settings';
+export type IDBStores =
+  | 'graphs'
+  | 'graphNodes'
+  | 'graphEdges'
+  | 'graphReferences'
+  | 'settings'
+  | 'thumbnailEntries'
+  | 'thumbnailBlobs';

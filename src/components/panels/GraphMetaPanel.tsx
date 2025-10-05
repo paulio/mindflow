@@ -356,7 +356,7 @@ export const GraphMetaPanel: React.FC = () => {
             <div style={{ display:'flex', gap:6 }}>
               <button type="button" style={{ background:'#222', color:'#fff', padding:'4px 8px', border:'1px solid #444', cursor:'pointer' }} onClick={async () => {
                 if (!graph) return;
-                const blob = await exportGraphAsPng(graph, nodes, edges);
+                const blob = await exportGraphAsPng(graph, nodes, edges, { persistThumbnail: true, trigger: 'export' });
                 if (blob) triggerDownload(`${graph.name || 'graph'}.png`, blob);
               }}>PNG</button>
               <button type="button" style={{ background:'#222', color:'#fff', padding:'4px 8px', border:'1px solid #444', cursor:'pointer' }} onClick={() => {

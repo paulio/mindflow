@@ -1,7 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGraph } from '../../state/graph-store';
-import type { ImportSummary } from '../../lib/export';
+import type { ImportEntry, ImportSummary } from '../../lib/export';
 import { EXPORT_MANIFEST_VERSION } from '../../lib/export';
+import { getThumbnailBlob } from '../../lib/indexeddb';
+import type { GraphRecord } from '../../lib/types';
+import ThumbnailSkeleton from '../ui/ThumbnailSkeleton';
+import ThumbnailStatusBadge, { type ThumbnailStatusBadgeState } from '../ui/ThumbnailStatusBadge';
 
 interface ModalProps {
   title: string;
@@ -93,6 +97,331 @@ interface ImportProgressState {
   summary?: ImportSummary;
 }
 
+const EMPTY_IMPORT_ENTRIES: ImportEntry[] = [];
+
+type GraphContextValue = ReturnType<typeof useGraph>;
+type ThumbnailStatusInfo = GraphContextValue['thumbnailStatuses'][string];
+
+const THUMBNAIL_CONTAINER_STYLE: React.CSSProperties = {
+  position: 'relative',
+  width: '100%',
+  aspectRatio: '16 / 9',
+  borderRadius: 'var(--radius-md)',
+  overflow: 'hidden',
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.06)',
+  cursor: 'pointer',
+};
+
+const THUMBNAIL_IMAGE_STYLE: React.CSSProperties = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'contain',
+  display: 'block',
+  background: 'rgba(10,10,14,0.6)',
+};
+
+const THUMBNAIL_BADGE_STYLE: React.CSSProperties = {
+  position: 'absolute',
+  top: 10,
+  left: 10,
+  display: 'flex',
+};
+
+const THUMBNAIL_RETRY_STYLE: React.CSSProperties = {
+  position: 'absolute',
+  top: 10,
+  right: 10,
+  padding: '4px 10px',
+  borderRadius: '999px',
+  border: '1px solid rgba(255,255,255,0.12)',
+  background: 'rgba(0,0,0,0.55)',
+  color: 'rgba(255,255,255,0.88)',
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: '0.02em',
+  textTransform: 'uppercase',
+  cursor: 'pointer',
+};
+
+const CARD_STYLE: React.CSSProperties = {
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-lg)',
+  padding: '12px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  background: 'rgba(12,12,16,0.64)',
+};
+
+const CARD_META_STYLE: React.CSSProperties = {
+  display: 'flex',
+  gap: 12,
+  alignItems: 'flex-start',
+};
+
+const CARD_DETAILS_STYLE: React.CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+};
+
+const CARD_PRIMARY_ACTION_STYLE: React.CSSProperties = {
+  background: 'transparent',
+  border: 'none',
+  color: 'inherit',
+  textAlign: 'left',
+  fontWeight: 600,
+  fontSize: 16,
+  cursor: 'pointer',
+  padding: 0,
+};
+
+const CARD_META_TEXT_STYLE: React.CSSProperties = {
+  fontSize: 12,
+  opacity: 0.7,
+};
+
+function formatBadgeLabel(status: ThumbnailStatusInfo | undefined, retryLimit: number): { state: ThumbnailStatusBadgeState; label: string } | null {
+  if (!status) {
+    return { state: 'queued', label: 'Queued' };
+  }
+  if (status.pending || status.status === 'pending' || status.status === 'refreshing') {
+    return { state: 'loading', label: 'Refreshing…' };
+  }
+  if (status.status === 'queued') {
+    return { state: 'queued', label: 'Queued' };
+  }
+  if (status.status === 'failed') {
+    const attempts = Math.min(status.retryCount, retryLimit);
+    const limitLabel = `${attempts}/${retryLimit}`;
+    return { state: 'failed', label: `Failed (${limitLabel})` };
+  }
+  if (status.status === 'ready') {
+    return { state: 'ready', label: 'Ready' };
+  }
+  return null;
+}
+
+interface UseThumbnailAssetOptions {
+  mapId: string;
+  status?: ThumbnailStatusInfo;
+  onMissingBlob?: () => void;
+}
+
+function useThumbnailAsset({ mapId, status, onMissingBlob }: UseThumbnailAssetOptions) {
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [fetching, setFetching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const currentUrlRef = useRef<string | null>(null);
+  const missingKeyRef = useRef<string | null>(null);
+
+  useEffect(() => () => {
+    if (currentUrlRef.current) {
+      URL.revokeObjectURL(currentUrlRef.current);
+      currentUrlRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!status || status.status !== 'ready') {
+      if (!status) {
+        missingKeyRef.current = null;
+      }
+      setError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const statusKey = `${status.updatedAt ?? 'unknown'}:${status.retryCount}`;
+    setFetching(true);
+
+    (async () => {
+      try {
+        const blob = await getThumbnailBlob(mapId);
+        if (cancelled) return;
+        if (!blob) {
+          setThumbnailUrl(prev => {
+            if (prev && currentUrlRef.current === prev) {
+              URL.revokeObjectURL(prev);
+              currentUrlRef.current = null;
+            }
+            return null;
+          });
+          setError('missing');
+          if (onMissingBlob && missingKeyRef.current !== statusKey) {
+            missingKeyRef.current = statusKey;
+            onMissingBlob();
+          }
+          return;
+        }
+        missingKeyRef.current = null;
+        const nextUrl = URL.createObjectURL(blob);
+        if (currentUrlRef.current && currentUrlRef.current !== nextUrl) {
+          URL.revokeObjectURL(currentUrlRef.current);
+        }
+        currentUrlRef.current = nextUrl;
+        setThumbnailUrl(nextUrl);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'unknown');
+        setThumbnailUrl(prev => {
+          if (prev && currentUrlRef.current === prev) {
+            URL.revokeObjectURL(prev);
+            currentUrlRef.current = null;
+          }
+          return null;
+        });
+      } finally {
+        if (!cancelled) {
+          setFetching(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mapId, onMissingBlob, status]);
+
+  const isLoading = fetching || status?.pending === true || status?.status === 'refreshing' || status?.status === 'pending';
+
+  return { thumbnailUrl, isLoading, error };
+}
+
+interface LibraryMapCardProps {
+  graph: GraphRecord;
+  selected: boolean;
+  onToggleSelection(checked: boolean): void;
+  onOpen(): void;
+  status?: ThumbnailStatusInfo;
+  retryLimit: number;
+  onRefresh(): void;
+}
+
+const LibraryMapCard: React.FC<LibraryMapCardProps> = ({ graph, selected, onToggleSelection, onOpen, status, retryLimit, onRefresh }) => {
+  const canRequestRefresh = !status || status.retryCount < retryLimit;
+  const handleMissingBlob = useCallback(() => {
+    if (canRequestRefresh) {
+      onRefresh();
+    }
+  }, [canRequestRefresh, onRefresh]);
+
+  const { thumbnailUrl, isLoading, error } = useThumbnailAsset({ mapId: graph.id, status, onMissingBlob: canRequestRefresh ? handleMissingBlob : undefined });
+  const badge = formatBadgeLabel(status, retryLimit);
+  const showRetry = status?.status === 'failed';
+  const retryDisabled = !canRequestRefresh || status?.pending === true;
+  const failureMessage = status?.status === 'failed' ? status.failureReason : null;
+  const checkboxId = `library-select-${graph.id}`;
+  const retryTitle = !showRetry
+    ? undefined
+    : retryDisabled
+      ? status?.pending
+        ? 'Thumbnail refresh in progress'
+        : 'Retry limit reached'
+      : 'Retry thumbnail refresh';
+  const thumbnailContainerStyle = useMemo<React.CSSProperties>(() => ({
+    ...THUMBNAIL_CONTAINER_STYLE,
+  }), []);
+
+  const handleThumbnailClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented) return;
+    if (event.target instanceof HTMLElement) {
+      const interactiveRoot = event.target.closest('button, a, input, label');
+      if (interactiveRoot && interactiveRoot !== event.currentTarget) {
+        return;
+      }
+    }
+    onOpen();
+  }, [onOpen]);
+
+  const handleThumbnailKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onOpen();
+    }
+  }, [onOpen]);
+
+  return (
+    <li style={CARD_STYLE}>
+      <div
+        style={thumbnailContainerStyle}
+        role="button"
+        tabIndex={0}
+        aria-label={`Open ${graph.name}`}
+        onClick={handleThumbnailClick}
+        onKeyDown={handleThumbnailKeyDown}
+      >
+        {thumbnailUrl ? (
+          <img src={thumbnailUrl} alt={`Thumbnail of ${graph.name}`} style={THUMBNAIL_IMAGE_STYLE} />
+        ) : isLoading ? (
+          <ThumbnailSkeleton ariaLabel={`Loading thumbnail for ${graph.name}`} />
+        ) : (
+          <div className="mf-thumbnail-placeholder" role="img" aria-label="Thumbnail unavailable">
+            No preview yet
+          </div>
+        )}
+        {badge && (
+          <div style={THUMBNAIL_BADGE_STYLE}>
+            <ThumbnailStatusBadge state={badge.state} label={badge.label} />
+          </div>
+        )}
+        {showRetry && (
+          <button
+            type="button"
+            onClick={event => {
+              event.stopPropagation();
+              if (!retryDisabled) onRefresh();
+            }}
+            onKeyDown={event => {
+              event.stopPropagation();
+            }}
+            disabled={retryDisabled}
+            style={{
+              ...THUMBNAIL_RETRY_STYLE,
+              cursor: retryDisabled ? 'not-allowed' : 'pointer',
+              opacity: retryDisabled ? 0.5 : 1,
+            }}
+            title={retryTitle}
+          >
+            Retry
+          </button>
+        )}
+      </div>
+      <div style={CARD_META_STYLE}>
+        <input
+          id={checkboxId}
+          type="checkbox"
+          aria-label={`Select ${graph.name}`}
+          checked={selected}
+          onChange={event => onToggleSelection(event.target.checked)}
+        />
+        <div style={CARD_DETAILS_STYLE}>
+          <button type="button" onClick={onOpen} style={CARD_PRIMARY_ACTION_STYLE}>
+            {graph.name}
+          </button>
+          <span style={CARD_META_TEXT_STYLE}>Last opened: {formatDateTime(graph.lastOpened)}</span>
+          {failureMessage && (
+            <span style={{ ...CARD_META_TEXT_STYLE, color: 'var(--color-warning, #ffd166)' }}>
+              {failureMessage}
+            </span>
+          )}
+          {error && !failureMessage && (
+            <span style={{ ...CARD_META_TEXT_STYLE, color: 'var(--color-warning, #ffd166)' }}>
+              Unable to load thumbnail. Try refreshing.
+            </span>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+};
+
 export const MapLibrary: React.FC = () => {
   const {
     graphs,
@@ -109,6 +438,9 @@ export const MapLibrary: React.FC = () => {
     resolveImportConflict,
     finalizeImportSession,
     clearImportSession,
+    thumbnailStatuses,
+    requestThumbnailRefresh,
+    thumbnailRetryLimit,
   } = useGraph();
 
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
@@ -118,21 +450,50 @@ export const MapLibrary: React.FC = () => {
   const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
   const [importResult, setImportResult] = useState<ImportSummary | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const progressDetailKeys = useRef<Set<string>>(new Set());
+  const autoRefreshKeysRef = useRef<Set<string>>(new Set());
 
   const selectedMaps = useMemo(
     () => graphs.filter(graph => selectedLibraryIds.includes(graph.id)),
     [graphs, selectedLibraryIds]
   );
 
-  const importEntries = importContext?.session.entries ?? [];
+  const importEntries = importContext?.session.entries ?? EMPTY_IMPORT_ENTRIES;
   const isImportSummaryOpen = importContext?.session.status === 'pending';
   const manifestVersion = importContext?.manifest.manifestVersion ?? null;
   const manifestNeedsMigration = (manifestVersion ?? EXPORT_MANIFEST_VERSION) < EXPORT_MANIFEST_VERSION;
   const currentConflictEntry = activeConflictIndex >= 0 ? importEntries[activeConflictIndex] : undefined;
+
+  const handleSelectionToggle = useCallback((mapId: string, checked: boolean) => {
+    if (checked) {
+      addLibrarySelection([mapId]);
+    } else {
+      toggleLibrarySelection(mapId);
+    }
+  }, [addLibrarySelection, toggleLibrarySelection]);
+
+  const handleOpenMap = useCallback((mapId: string) => {
+    void selectGraph(mapId);
+  }, [selectGraph]);
+
+  const handleRefreshThumbnail = useCallback((mapId: string) => {
+    void requestThumbnailRefresh(mapId, 'library:open');
+  }, [requestThumbnailRefresh]);
+
+  useEffect(() => {
+    graphs.forEach(graph => {
+      const status = thumbnailStatuses[graph.id];
+      if (!status || (status.status === 'queued' && !status.pending)) {
+        const key = `${graph.id}:${status?.updatedAt ?? 'initial'}`;
+        if (!autoRefreshKeysRef.current.has(key)) {
+          autoRefreshKeysRef.current.add(key);
+          void requestThumbnailRefresh(graph.id, 'library:open');
+        }
+      }
+    });
+  }, [graphs, thumbnailStatuses, requestThumbnailRefresh]);
 
   useEffect(() => {
     if (!toastMessage) return;
@@ -402,41 +763,21 @@ export const MapLibrary: React.FC = () => {
             </div>
           </div>
           {graphs.length === 0 && <div style={{ opacity: 0.6, fontSize: 14 }}>No maps yet. Create one to begin.</div>}
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
             {graphs.map(graph => {
               const checked = selectedLibraryIds.includes(graph.id);
+              const status = thumbnailStatuses[graph.id];
               return (
-                <li key={graph.id} style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <input
-                      type="checkbox"
-                      aria-label={graph.name}
-                      checked={checked}
-                      onChange={event => {
-                        if (event.target.checked) addLibrarySelection([graph.id]);
-                        else toggleLibrarySelection(graph.id);
-                      }}
-                    />
-                    <button
-                      onClick={() => selectGraph(graph.id)}
-                      style={{
-                        background: 'transparent',
-                        color: 'inherit',
-                        border: 'none',
-                        textAlign: 'left',
-                        fontWeight: 600,
-                        fontSize: 15,
-                        cursor: 'pointer',
-                        flex: 1,
-                      }}
-                    >
-                      {graph.name}
-                    </button>
-                  </div>
-                  <div style={{ fontSize: 12, opacity: 0.75 }}>
-                    Last opened: {formatDateTime(graph.lastOpened)}
-                  </div>
-                </li>
+                <LibraryMapCard
+                  key={graph.id}
+                  graph={graph}
+                  selected={checked}
+                  status={status}
+                  retryLimit={thumbnailRetryLimit}
+                  onToggleSelection={next => handleSelectionToggle(graph.id, next)}
+                  onOpen={() => handleOpenMap(graph.id)}
+                  onRefresh={() => handleRefreshThumbnail(graph.id)}
+                />
               );
             })}
           </ul>
