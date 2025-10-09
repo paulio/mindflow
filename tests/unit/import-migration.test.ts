@@ -13,7 +13,7 @@ async function createLegacyArchive(): Promise<Uint8Array> {
   });
 
   const manifest = {
-    manifestVersion: EXPORT_MANIFEST_VERSION - 1,
+    manifestVersion: Math.max(1, EXPORT_MANIFEST_VERSION - 1),
     generatedAt: '2024-01-01T00:00:00.000Z',
     appVersion: '0.9.0',
     totalMaps: 1,

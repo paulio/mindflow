@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Mindflow Static Site Telemetry Event",
+  "type": "object",
+  "required": ["eventId", "eventType", "timestamp"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "eventType": {
+      "type": "string",
+      "enum": ["http_request", "deployment_status"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "request": {
+      "type": "object",
+      "required": ["method", "path", "statusCode"],
+      "properties": {
+        "method": { "type": "string" },
+        "path": { "type": "string" },
+        "statusCode": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "cacheStatus": { "type": "string", "enum": ["hit", "miss", "bypass", "error"], "nullable": true }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "required": ["deploymentId", "status"],
+      "properties": {
+        "deploymentId": { "type": "string" },
+        "status": { "type": "string", "enum": ["succeeded", "failed"] },
+        "commitSha": { "type": "string", "minLength": 7, "maxLength": 40 },
+        "branch": { "type": "string", "const": "main" }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "eventType": { "const": "http_request" } } },
+      "then": { "required": ["request"], "not": { "required": ["deployment"] } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "deployment_status" } } },
+      "then": { "required": ["deployment"], "not": { "required": ["request"] } }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "eventId": "7160f5f0-0c6a-4fe8-a7ed-06aeb7f1e2d9",
+  "eventType": "http_request",
+  "timestamp": "2025-10-07T12:00:00.000Z",
+  "request": {
+    "method": "GET",
+    "path": "/",
+    "statusCode": 200,
+    "durationMs": 142,
+    "cacheStatus": "hit"
+  },
+  "metadata": {
+    "clientIpHash": "3dd467c1",
+    "userAgent": "Mozilla/5.0"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "clientPrincipal": {
+    "identityProvider": "aad",
+    "userId": "00000000-0000-4000-8000-000000000001",
+    "userDetails": "Adele Vance",
+    "userRoles": ["authenticated"],
+    "claims": [
+      { "typ": "name", "val": "Adele Vance" },
+      { "typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname", "val": "Adele" },
+      { "typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname", "val": "Vance" },
+      { "typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", "val": "00000000-0000-4000-8000-000000000001" },
+      { "typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress", "val": "adele@contoso.com" }
+    ]
+  }
+}

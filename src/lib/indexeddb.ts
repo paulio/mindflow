@@ -8,8 +8,9 @@ import {
 import type { ThumbnailCacheEntry, ThumbnailStatus, ThumbnailTrigger } from './thumbnails';
 import { GraphRecord, NodeRecord, EdgeRecord, PersistenceSnapshot, ReferenceConnectionRecord } from './types';
 import { emitThumbnailEvictionEvent } from './events';
+import type { MapWorkspace } from './workspace/map-workspace';
 
-const DB_NAME = 'mindflow';
+const BASE_DB_NAME = 'mindflow';
 // Bump version to add thumbnail metadata/blob stores (Feature 009)
 const DB_VERSION = 3;
 
@@ -18,6 +19,49 @@ const THUMBNAIL_BLOB_STORE = 'thumbnailBlobs';
 export const THUMBNAIL_QUOTA_BYTES = 10 * 1024 * 1024; // 10 MB cap per spec
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
+let currentDbName = BASE_DB_NAME;
+let workspaceWritable = true;
+let workspaceIsolationTag: string | null = null;
+
+function getDbName(): string {
+  return currentDbName;
+}
+
+function closeDatabase(): void {
+  if (!dbPromise) return;
+  dbPromise
+    .then(db => db.close())
+    .catch(() => void 0);
+  dbPromise = null;
+}
+
+function assertWorkspaceWritable(operation: string): void {
+  if (!workspaceWritable) {
+    throw new Error(`Workspace is disabled; ${operation} is not permitted.`);
+  }
+}
+
+export function configureWorkspace(workspace: MapWorkspace | null): void {
+  const nextDbName = workspace ? `${BASE_DB_NAME}-${workspace.isolationTag}` : BASE_DB_NAME;
+  const nextWritable = workspace ? !workspace.disabledAccessFlag : true;
+  const nextIsolationTag = workspace?.isolationTag ?? null;
+
+  const dbNameChanged = nextDbName !== currentDbName;
+  const writableChanged = nextWritable !== workspaceWritable;
+  const tagChanged = nextIsolationTag !== workspaceIsolationTag;
+
+  if (dbNameChanged || writableChanged || tagChanged) {
+    closeDatabase();
+  }
+
+  currentDbName = nextDbName;
+  workspaceWritable = nextWritable;
+  workspaceIsolationTag = nextIsolationTag;
+}
+
+export function resetWorkspaceConfiguration(): void {
+  configureWorkspace(null);
+}
 
 function nowIso() { return new Date().toISOString(); }
 
@@ -28,7 +72,7 @@ export function generateId() {
 
 export function initDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
+    dbPromise = openDB(getDbName(), DB_VERSION, {
       upgrade(db) {
         if (!db.objectStoreNames.contains('graphs')) {
           const store = db.createObjectStore('graphs', { keyPath: 'id' });
@@ -98,6 +142,7 @@ function clampRetryCount(value: number | undefined): 0 | 1 {
 }
 
 export async function createGraph(name: string, opts?: { autoLoadLast?: boolean }): Promise<GraphRecord> {
+  assertWorkspaceWritable('create graph');
   const db = await initDB();
   const ts = nowIso();
   const record: GraphRecord = {
@@ -204,6 +249,7 @@ export async function getGraphSnapshots(graphIds: string[]): Promise<Persistence
 }
 
 export async function saveNodes(graphId: string, upserts: NodeRecord[]) {
+  assertWorkspaceWritable('save nodes');
   const db = await initDB();
   const tx = db.transaction(['graphNodes','graphs'], 'readwrite');
   const nodesStore = tx.objectStore('graphNodes');
@@ -221,6 +267,7 @@ export async function saveNodes(graphId: string, upserts: NodeRecord[]) {
 }
 
 export async function saveEdges(graphId: string, upserts: EdgeRecord[]) {
+  assertWorkspaceWritable('save edges');
   const db = await initDB();
   const tx = db.transaction(['graphEdges','graphs'], 'readwrite');
   const store = tx.objectStore('graphEdges');
@@ -237,6 +284,7 @@ export async function saveEdges(graphId: string, upserts: EdgeRecord[]) {
 }
 
 export async function saveReferences(graphId: string, upserts: ReferenceConnectionRecord[]) {
+  assertWorkspaceWritable('save references');
   const db = await initDB();
   if (!db.objectStoreNames.contains('graphReferences')) return; // backward compatibility (pre-upgrade)
   const tx = db.transaction(['graphReferences','graphs'], 'readwrite');
@@ -256,6 +304,7 @@ export async function saveReferences(graphId: string, upserts: ReferenceConnecti
 
 export async function deleteReferences(graphId: string, ids: string[]) {
   if (!ids.length) return;
+  assertWorkspaceWritable('delete references');
   const db = await initDB();
   if (!db.objectStoreNames.contains('graphReferences')) return; // backward compatibility
   const tx = db.transaction(['graphReferences','graphs'], 'readwrite');
@@ -273,6 +322,7 @@ export async function deleteReferences(graphId: string, ids: string[]) {
 }
 
 export async function deleteGraph(graphId: string) {
+  assertWorkspaceWritable('delete graph');
   const db = await initDB();
   const stores: any[] = ['graphs','graphNodes','graphEdges'];
   if (db.objectStoreNames.contains('graphReferences')) stores.push('graphReferences');
@@ -323,6 +373,7 @@ export interface PutThumbnailResult {
 }
 
 export async function putThumbnail(options: PutThumbnailOptions): Promise<PutThumbnailResult> {
+  assertWorkspaceWritable('put thumbnail');
   const db = await initDB();
   assertThumbnailStores(db);
 
@@ -399,6 +450,7 @@ export async function getThumbnailEntry(mapId: string): Promise<ThumbnailCacheEn
 }
 
 export async function touchThumbnail(mapId: string, accessedAt?: string): Promise<ThumbnailCacheEntry | null> {
+  assertWorkspaceWritable('touch thumbnail');
   const db = await initDB();
   if (!hasThumbnailStores(db)) return null;
   const tx = db.transaction(THUMBNAIL_METADATA_STORE, 'readwrite');
@@ -430,6 +482,7 @@ export async function incrementThumbnailRetry(
   mapId: string,
   failureReason?: string | null,
 ): Promise<ThumbnailCacheEntry | null> {
+  assertWorkspaceWritable('increment thumbnail retry');
   const db = await initDB();
   if (!hasThumbnailStores(db)) return null;
   const tx = db.transaction(THUMBNAIL_METADATA_STORE, 'readwrite');
@@ -479,6 +532,7 @@ export async function trimThumbnailsToQuota(
   quotaBytes: number = THUMBNAIL_QUOTA_BYTES,
   providedDb?: IDBPDatabase,
 ): Promise<TrimThumbnailsResult> {
+  assertWorkspaceWritable('trim thumbnails');
   const db = providedDb ?? await initDB();
   if (!hasThumbnailStores(db)) {
     return { removed: [], totalBytes: 0 };
@@ -577,6 +631,7 @@ export async function getThumbnailBlob(mapId: string): Promise<Blob | null> {
 }
 
 export async function deleteThumbnail(mapId: string): Promise<void> {
+  assertWorkspaceWritable('delete thumbnail');
   const db = await initDB();
   if (!hasThumbnailStores(db)) return;
 
@@ -597,6 +652,7 @@ export async function deleteThumbnail(mapId: string): Promise<void> {
 }
 
 export async function updateGraphMeta(graphId: string, patch: Partial<Pick<GraphRecord,'name'|'settings'|'viewport'>>) {
+  assertWorkspaceWritable('update graph metadata');
   const db = await initDB();
   const graph = await db.get('graphs', graphId) as GraphRecord | undefined;
   if (!graph) return;
@@ -608,7 +664,7 @@ export async function updateGraphMeta(graphId: string, patch: Partial<Pick<Graph
 }
 
 export async function cloneGraph(sourceGraphId: string): Promise<GraphRecord | null> {
-  const db = await initDB();
+  assertWorkspaceWritable('clone graph');
   const snap = await loadGraph(sourceGraphId);
   if (!snap) return null;
   const existing = await listGraphs();
@@ -668,6 +724,7 @@ export async function persistNodeDeletion(
   removedEdgeIds: string[],
   newEdges: EdgeRecord[]
 ): Promise<void> {
+  assertWorkspaceWritable('persist node deletion');
   const db = await initDB();
   const tx = db.transaction(['graphNodes','graphEdges','graphs'], 'readwrite');
   // Delete node
@@ -700,6 +757,7 @@ export async function getSetting<T=unknown>(key: string): Promise<T | undefined>
 }
 
 export async function setSetting<T=unknown>(key: string, value: T): Promise<void> {
+  assertWorkspaceWritable('set setting');
   const db = await initDB();
   await db.put('settings', { key, value });
 }

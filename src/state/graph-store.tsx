@@ -20,6 +20,8 @@ import {
   incrementThumbnailRetry,
   listThumbnailEntries,
   deleteThumbnail,
+  configureWorkspace,
+  resetWorkspaceConfiguration,
 } from '../lib/indexeddb';
 import { createNode, createEdge } from '../lib/graph-domain';
 import { computeInitialBorderColour, BORDER_COLOUR_PALETTE, ROOT_FALLBACK } from '../lib/node-border-palette';
@@ -44,6 +46,9 @@ import {
   ExportArchiveOptions,
   EXPORT_MANIFEST_VERSION,
 } from '../lib/export';
+import type { StaticWebAppsProfile, UserIdentity } from '../lib/auth/user-identity';
+import { parseUserIdentity } from '../lib/auth/user-identity';
+import { createMapWorkspace, markWorkspaceDisabled, type MapWorkspace } from '../lib/workspace/map-workspace';
 
 const APP_VERSION = (pkg as { version?: string }).version ?? '0.0.0';
 
@@ -73,6 +78,15 @@ interface ThumbnailStatusInfo {
 }
 
 const THUMBNAIL_RETRY_LIMIT = 1;
+
+const SESSION_NONCE_KEY = 'mindflow:sessionNonce';
+
+function generateSessionNonce() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 const DEFAULT_THUMBNAIL_STATUS: ThumbnailStatusInfo = {
   status: 'queued',
@@ -104,6 +118,16 @@ function nowMs() {
 }
 
 interface GraphContext extends GraphState {
+  identity: UserIdentity | null;
+  workspace: MapWorkspace | null;
+  identityStatus: 'idle' | 'loading' | 'ready' | 'error';
+  identityError: string | null;
+  sessionNonce: string | null;
+  lastSessionRevokedAt: string | null;
+  applyIdentityFromProfile(profile: StaticWebAppsProfile, options?: { disabled?: boolean }): Promise<UserIdentity>;
+  loadIdentity(options?: { signal?: AbortSignal }): Promise<UserIdentity | null>;
+  clearIdentity(): void;
+  setWorkspaceDisabled(disabled: boolean): void;
   currentGraph: GraphRecord | null;
   newGraph(): Promise<void>;
   selectGraph(id: string): Promise<void>;
@@ -188,6 +212,12 @@ interface GraphContext extends GraphState {
 const Ctx = createContext<GraphContext | null>(null);
 
 export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [identity, setIdentity] = useState<UserIdentity | null>(null);
+  const [workspace, setWorkspace] = useState<MapWorkspace | null>(null);
+  const [identityStatus, setIdentityStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [identityError, setIdentityError] = useState<string | null>(null);
+  const [sessionNonce, setSessionNonce] = useState<string | null>(null);
+  const [lastSessionRevokedAt, setLastSessionRevokedAt] = useState<string | null>(null);
   const [graph, setGraph] = useState<GraphRecord | null>(null);
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [edges, setEdges] = useState<EdgeRecord[]>([]);
@@ -206,6 +236,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [importContext, setImportContext] = useState<ImportArchiveInspection | null>(null);
   const [selectedLibraryIds, setSelectedLibraryIds] = useState<string[]>([]);
   const [thumbnailStatuses, setThumbnailStatuses] = useState<Record<string, ThumbnailStatusInfo>>({});
+  const identityRef = useRef<UserIdentity | null>(null);
   const mutationCounter = useRef(0);
   const thumbnailStatusesRef = useRef<Record<string, ThumbnailStatusInfo>>({});
   const refreshQueue = useRef(new Map<string, Promise<void>>());
@@ -215,6 +246,20 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     thumbnailStatusesRef.current = thumbnailStatuses;
   }, [thumbnailStatuses]);
+
+  useEffect(() => {
+    identityRef.current = identity;
+  }, [identity]);
+
+  useEffect(() => {
+    if (typeof sessionStorage === 'undefined') return;
+    try {
+      const existing = sessionStorage.getItem(SESSION_NONCE_KEY);
+      if (existing) setSessionNonce(existing);
+    } catch {
+      // ignore storage access errors (private browsing, etc.)
+    }
+  }, []);
 
   const normalizeLibrarySelection = useCallback((ids: string[]) => {
     if (!ids.length) return ids;
@@ -244,6 +289,148 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setGraphs(await listGraphs());
     } catch { /* ignore listing errors in headless */ }
   }, []);
+
+  const resetGraphSession = useCallback(() => {
+    resetUndoHistory();
+    mutationCounter.current = 0;
+    setGraph(null);
+    setNodes([]);
+    setEdges([]);
+    setReferences([]);
+    setGraphs([]);
+    setView('library');
+    _setPendingChanges(false);
+    setSelectedNodeId(null);
+    setSelectedNodeIds([]);
+    setSelectedReferenceId(null);
+    setEditingNodeId(null);
+    setMarquee(null);
+    setInteractionMode('select');
+    setLevels(new Map());
+    setActiveTool(null);
+    setImportContext(null);
+    setSelectedLibraryIds([]);
+    setThumbnailStatuses({});
+    thumbnailStatusesRef.current = {};
+    refreshQueue.current.clear();
+  }, []);
+
+  const clearIdentity = useCallback(() => {
+    resetGraphSession();
+    setIdentity(null);
+    identityRef.current = null;
+    setWorkspace(null);
+    setIdentityStatus('idle');
+    setIdentityError(null);
+    setSessionNonce(null);
+    setLastSessionRevokedAt(null);
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        sessionStorage.removeItem(SESSION_NONCE_KEY);
+      } catch {
+        // ignore storage removal failures (private browsing, etc.)
+      }
+    }
+    resetWorkspaceConfiguration();
+    void refreshList();
+  }, [refreshList, resetGraphSession]);
+
+  const adoptIdentity = useCallback(async (nextIdentity: UserIdentity, options?: { disabled?: boolean }) => {
+    if (identityRef.current) {
+      setLastSessionRevokedAt(new Date().toISOString());
+    } else {
+      setLastSessionRevokedAt(null);
+    }
+
+    resetGraphSession();
+
+    const baseWorkspace = createMapWorkspace(nextIdentity);
+    const workspaceRecord = options?.disabled ? markWorkspaceDisabled(baseWorkspace) : baseWorkspace;
+
+    configureWorkspace(workspaceRecord);
+    setWorkspace(workspaceRecord);
+
+    const activeIdentity: UserIdentity = { ...nextIdentity, sessionState: 'active' };
+    setIdentity(activeIdentity);
+    identityRef.current = activeIdentity;
+
+    setIdentityStatus('ready');
+    setIdentityError(null);
+
+    const nonce = generateSessionNonce();
+    setSessionNonce(nonce);
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        sessionStorage.setItem(SESSION_NONCE_KEY, nonce);
+      } catch {
+        // ignore storage write failures
+      }
+    }
+
+    await refreshList();
+    return activeIdentity;
+  }, [refreshList, resetGraphSession]);
+
+  const applyIdentityFromProfile = useCallback(async (profile: StaticWebAppsProfile, options?: { disabled?: boolean }) => {
+    if (!profile?.clientPrincipal) {
+      clearIdentity();
+      throw new Error('Static Web Apps profile missing client principal');
+    }
+    const parsed = parseUserIdentity(profile);
+    return adoptIdentity(parsed, options);
+  }, [adoptIdentity, clearIdentity]);
+
+  const loadIdentity = useCallback(async (options?: { signal?: AbortSignal }) => {
+    setIdentityStatus('loading');
+    setIdentityError(null);
+    try {
+      const response = await fetch('/.auth/me', {
+        headers: { 'Cache-Control': 'no-store' },
+        credentials: 'include',
+        signal: options?.signal,
+      });
+
+      if (response.status === 401 || response.status === 403 || response.status === 204) {
+        clearIdentity();
+        return null;
+      }
+
+      if (!response.ok) {
+        throw new Error(`Failed to load identity (${response.status})`);
+      }
+
+      const profile = await response.json() as StaticWebAppsProfile;
+      if (!profile?.clientPrincipal) {
+        clearIdentity();
+        return null;
+      }
+
+      return await applyIdentityFromProfile(profile, undefined);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        setIdentityStatus(identityRef.current ? 'ready' : 'idle');
+        return identityRef.current;
+      }
+      const message = error instanceof Error ? error.message : 'Unknown identity error';
+      setIdentityStatus('error');
+      setIdentityError(message);
+      throw error instanceof Error ? error : new Error(message);
+    }
+  }, [applyIdentityFromProfile, clearIdentity]);
+
+  const setWorkspaceDisabled = useCallback((disabled: boolean) => {
+    setWorkspace(prev => {
+      if (!prev) return prev;
+      const next = disabled ? markWorkspaceDisabled(prev) : { ...prev, disabledAccessFlag: false };
+      configureWorkspace(next);
+      return next;
+    });
+    if (disabled) {
+      setView('library');
+    } else {
+      void refreshList();
+    }
+  }, [refreshList]);
 
   const snapshotForMap = useCallback(async (mapId: string): Promise<PersistenceSnapshot | null> => {
     if (!mapId) return null;
@@ -1747,7 +1934,102 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   React.useEffect(() => { refreshList(); }, [refreshList]);
 
-  return <Ctx.Provider value={{ graph, currentGraph: graph, nodes, edges, graphs, view, references, newGraph, selectGraph, openLibrary, renameGraph, removeGraph, addNode, addEdge, addConnectedNode, updateNodeText, updateNodeColors, updateNodeZOrder, updateNoteAlignment, moveNode, updateViewport, setNodePositionEphemeral, deleteNode, cloneCurrent, editingNodeId, startEditing, stopEditing, pendingChanges, selectedNodeId, selectNode, selectedReferenceId, selectReference, selectedNodeIds, replaceSelection, addToSelection, toggleSelection, clearSelection, selectedLibraryIds, replaceLibrarySelection, addLibrarySelection, toggleLibrarySelection, clearLibrarySelection, exportMaps, marquee, beginMarquee, updateMarquee, endMarquee, cancelMarquee, activateMarquee, interactionMode, setInteractionMode: setInteractionModeCb, levels, activeTool, activateTool, toggleTool, addAnnotation, resizeRectangle, resizeRectangleEphemeral, updateEdgeHandles, updateNoteFormatting, resetNoteFormatting, createReference, updateReferenceStyle, repositionReference, deleteReference, updateReferenceLabel, toggleReferenceLabelVisibility, overrideNodeBorder, clearNodeBorderOverride, getNodeBorderInfo, importContext, stageImport, resolveImportConflict, finalizeImportSession, clearImportSession, thumbnailStatuses, requestThumbnailRefresh, thumbnailRetryLimit }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider
+      value={{
+        identity,
+        workspace,
+        identityStatus,
+        identityError,
+        sessionNonce,
+        lastSessionRevokedAt,
+        applyIdentityFromProfile,
+        loadIdentity,
+        clearIdentity,
+        setWorkspaceDisabled,
+        graph,
+        currentGraph: graph,
+        nodes,
+        edges,
+        graphs,
+        view,
+        references,
+        newGraph,
+        selectGraph,
+        openLibrary,
+        renameGraph,
+        removeGraph,
+        addNode,
+        addEdge,
+        addConnectedNode,
+        updateNodeText,
+        updateNodeColors,
+        updateNodeZOrder,
+        updateNoteAlignment,
+        moveNode,
+        updateViewport,
+        setNodePositionEphemeral,
+        deleteNode,
+        cloneCurrent,
+        editingNodeId,
+        startEditing,
+        stopEditing,
+        pendingChanges,
+        selectedNodeId,
+        selectNode,
+        selectedReferenceId,
+        selectReference,
+        selectedNodeIds,
+        replaceSelection,
+        addToSelection,
+        toggleSelection,
+        clearSelection,
+        selectedLibraryIds,
+        replaceLibrarySelection,
+        addLibrarySelection,
+        toggleLibrarySelection,
+        clearLibrarySelection,
+        exportMaps,
+        marquee,
+        beginMarquee,
+        updateMarquee,
+        endMarquee,
+        cancelMarquee,
+        activateMarquee,
+        interactionMode,
+        setInteractionMode: setInteractionModeCb,
+        levels,
+        activeTool,
+        activateTool,
+        toggleTool,
+        addAnnotation,
+        resizeRectangle,
+        resizeRectangleEphemeral,
+        updateEdgeHandles,
+        updateNoteFormatting,
+        resetNoteFormatting,
+        createReference,
+        updateReferenceStyle,
+        repositionReference,
+        deleteReference,
+        updateReferenceLabel,
+        toggleReferenceLabelVisibility,
+        overrideNodeBorder,
+        clearNodeBorderOverride,
+        getNodeBorderInfo,
+        importContext,
+        stageImport,
+        resolveImportConflict,
+        finalizeImportSession,
+        clearImportSession,
+        thumbnailStatuses,
+        requestThumbnailRefresh,
+        thumbnailRetryLimit,
+      }}
+    >
+      {children}
+    </Ctx.Provider>
+  );
 };
 
 export function useGraph() {

@@ -1,0 +1,14 @@
+{
+  "eventId": "a8c9b3af-05b1-4bc0-82ac-0c46be25c57d",
+  "eventType": "deployment_status",
+  "timestamp": "2025-10-07T12:05:00.000Z",
+  "deployment": {
+    "deploymentId": "wf-1234567890",
+    "status": "succeeded",
+    "commitSha": "abc1234def5678901234567890abcdef12345678",
+    "branch": "main"
+  },
+  "metadata": {
+    "runUrl": "https://github.com/paulio/mindflow/actions/runs/1234567890"
+  }
+}
