@@ -42,7 +42,17 @@ function getClaim(claims: Claim[] | undefined | null, type: string): string | un
 function sanitizeAvatar(url?: string): string | undefined {
   if (!url) return undefined;
   const trimmed = url.trim();
-  return trimmed.toLowerCase().startsWith('https://') ? trimmed : undefined;
+  const lower = trimmed.toLowerCase();
+
+  if (lower.startsWith('https://')) {
+    return trimmed;
+  }
+
+  if (lower.startsWith('data:image/')) {
+    return trimmed;
+  }
+
+  return undefined;
 }
 
 export function parseUserIdentity(profile: StaticWebAppsProfile): UserIdentity {
