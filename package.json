@@ -12,7 +12,8 @@
     "test:ui": "playwright test",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "export-disabled-account": "tsx scripts/export-disabled-account.ts"
+    "export-disabled-account": "tsx scripts/export-disabled-account.ts",
+    "create-static-web-app": "tsx scripts/create-static-web-app.ts"
   },
   "license": "MIT",
   "devDependencies": {
