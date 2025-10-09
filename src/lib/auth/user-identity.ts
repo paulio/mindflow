@@ -9,8 +9,8 @@ export interface ClientPrincipal {
   identityProvider: string;
   userId: string;
   userDetails: string;
-  userRoles: string[];
-  claims: Claim[];
+  userRoles?: string[] | null;
+  claims?: Claim[] | null;
 }
 
 export interface StaticWebAppsProfile {
@@ -31,8 +31,10 @@ export interface UserIdentity {
 const EMAIL_CLAIM = 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress';
 const TENANT_CLAIM = 'http://schemas.microsoft.com/identity/claims/tenantid';
 const PICTURE_CLAIM = 'picture';
+const UNKNOWN_TENANT_ID = 'tenant-unavailable';
 
-function getClaim(claims: Claim[], type: string): string | undefined {
+function getClaim(claims: Claim[] | undefined | null, type: string): string | undefined {
+  if (!Array.isArray(claims) || claims.length === 0) return undefined;
   const match = claims.find(claim => claim.typ === type);
   return match?.val?.trim() ? match.val : undefined;
 }
@@ -63,10 +65,7 @@ export function parseUserIdentity(profile: StaticWebAppsProfile): UserIdentity {
     throw new Error('Client principal missing display name');
   }
 
-  const tenantId = getClaim(claims, TENANT_CLAIM);
-  if (!tenantId) {
-    throw new Error('Client principal missing tenant claim');
-  }
+  const tenantId = getClaim(claims, TENANT_CLAIM) ?? UNKNOWN_TENANT_ID;
 
   const email = getClaim(claims, EMAIL_CLAIM);
   const avatarUrl = sanitizeAvatar(getClaim(claims, PICTURE_CLAIM));
@@ -79,6 +78,6 @@ export function parseUserIdentity(profile: StaticWebAppsProfile): UserIdentity {
     avatarUrl,
     lastLogin: new Date().toISOString(),
     sessionState: 'active',
-    roles: [...userRoles],
+    roles: Array.isArray(userRoles) ? [...userRoles] : [],
   };
 }
