@@ -6,9 +6,12 @@ describe('staticwebapp.config.json', () => {
     expect(config.auth).toBeDefined();
     const aad = config.auth?.identityProviders?.azureActiveDirectory;
     expect(aad).toBeDefined();
-    expect(aad?.registration?.login?.scopes).toContain('openid');
-    expect(aad?.registration?.login?.scopes).toContain('profile');
-    expect(aad?.registration?.login?.scopes).toContain('email');
+    const loginParameters = aad?.login?.loginParameters ?? [];
+    const scopeParam = loginParameters.find((value: string) => value.startsWith('scope='));
+    expect(scopeParam).toBeDefined();
+    expect(scopeParam).toContain('openid');
+    expect(scopeParam).toContain('profile');
+    expect(scopeParam).toContain('email');
   });
 
   it('forces authentication for application routes', () => {
@@ -19,10 +22,11 @@ describe('staticwebapp.config.json', () => {
   });
 
   it('defines neutral fallback response for unauthorized users', () => {
-    expect(Array.isArray(config.responseOverrides)).toBe(true);
-    const unauthorized = config.responseOverrides?.find((entry: any) => entry.statusCode === 401);
+    expect(typeof config.responseOverrides).toBe('object');
+    const unauthorized = (config.responseOverrides as Record<string, any>)?.['401'];
     expect(unauthorized).toBeDefined();
-    expect(unauthorized?.serve).toBe('/unauthorized/index.html');
+    expect(unauthorized?.rewrite).toBe('/unauthorized/index.html');
+    expect(unauthorized?.statusCode).toBe(200);
   });
 
   it('routes unknown paths to the SPA entry point', () => {
