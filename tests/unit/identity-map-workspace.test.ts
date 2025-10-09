@@ -11,8 +11,8 @@ interface ClientPrincipal {
   identityProvider: string;
   userId: string;
   userDetails: string;
-  userRoles: string[];
-  claims: Claim[];
+  userRoles?: string[] | null;
+  claims?: Claim[] | null;
 }
 
 const baseProfile: ClientPrincipal = {
@@ -45,7 +45,7 @@ describe('UserIdentity parsing', () => {
 		clientPrincipal: {
 			...baseProfile,
 			userDetails: 'No Avatar User',
-			claims: baseProfile.claims
+      claims: (baseProfile.claims ?? [])
 				.filter((claim: Claim) => claim.typ !== 'picture')
 				.concat({
 					typ: 'picture',
@@ -55,6 +55,23 @@ describe('UserIdentity parsing', () => {
 	});
 
     expect(identity.avatarUrl).toBeUndefined();
+  });
+
+  it('gracefully handles profiles without claims or roles', () => {
+    const identity = parseUserIdentity({
+      clientPrincipal: {
+        identityProvider: 'aad',
+        userId: baseProfile.userId,
+        userDetails: 'Minimal Claims User',
+        userRoles: null,
+        claims: null,
+      },
+    });
+
+    expect(identity.displayName).toBe('Minimal Claims User');
+    expect(identity.roles).toEqual([]);
+    expect(identity.email).toBeUndefined();
+    expect(identity.tenantId).toBe('tenant-unavailable');
   });
 });
 

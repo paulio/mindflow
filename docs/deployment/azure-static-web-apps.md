@@ -26,6 +26,30 @@ az staticwebapp secrets list --name <app-name> --resource-group <resource-group>
 
 > If the command prints nothing, double-check that the Static Web App actually exists in the current subscription: `az staticwebapp show --name <app-name> --resource-group <resource-group>`. Creation fails silently when the region is unsupported—use one of the published regions (`westus2`, `centralus`, `eastus2`, `westeurope`, `eastasia`) and rerun the provisioning script before fetching the token.
 
+## Entra ID Authentication Setup
+Authentication is enforced for every application route (`/*`). Static Web Apps expects an Azure AD app registration, with its identifiers supplied via app settings that match the keys referenced in `staticwebapp.config.json`.
+
+1. **Create (or reuse) an Entra ID app registration** in the same tenant as your users.
+	 - Azure Portal → **Microsoft Entra ID → App registrations → New registration**.
+	 - Name: `Mindflow Static Web App` (or similar), Supported account types: single tenant.
+	 - Redirect URI: `https://<your-static-web-app>.azurestaticapps.net/.auth/login/aad/callback`
+		 (add additional URIs for staging environments if you have them).
+2. **Generate a client secret** under **Certificates & secrets**. Record the secret value—it’s shown only once.
+3. **Add the credentials to the Static Web App**:
+	 - Static Web App → **Configuration → Application settings**.
+	 - Add the following keys:
+		 - `AAD_CLIENT_ID` = (Application (client) ID from the app registration)
+		 - `AAD_CLIENT_SECRET` = (client secret value you just generated)
+		 - Optional but recommended: `AAD_TENANT_ID` = (Directory (tenant) ID). If you add this, also update `staticwebapp.config.json` to set `openIdIssuer` to `https://login.microsoftonline.com/<tenant-id>/v2.0`.
+	 - Save and restart the app.
+4. **Enable the Azure AD provider** (if not already): Static Web App → **Authentication** → make sure **Azure Active Directory** is toggled on and points to the same app registration.
+5. **Validate locally** by visiting the production URL. You should be redirected to the Microsoft login. After success you’re returned to `/` with the app loaded.
+
+Troubleshooting tips:
+- A 404 after login usually means the rewrite target (for example `/unauthorized/index.html`) is missing—ensure `npm run build` copies the `public/unauthorized` assets and redeploy.
+- A blank page with `Not Authorized` indicates the `AAD_CLIENT_ID` or `AAD_CLIENT_SECRET` app settings are missing or incorrect; updating them requires a restart.
+- Check `https://<app>.azurestaticapps.net/.auth/me` to confirm the auth context after signing in.
+
 ## GitHub Secrets Configuration
 Azure Static Web Apps requires an authenticated deploy token. Without it the workflow fails with `deployment_token was not provided`.
 
