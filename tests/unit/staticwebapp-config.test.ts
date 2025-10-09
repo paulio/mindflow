@@ -29,6 +29,11 @@ describe('staticwebapp.config.json', () => {
     expect(unauthorized?.statusCode).toBe(200);
   });
 
+  it('avoids unreachable routes configuration', () => {
+    const coveredRoute = config.routes?.find((route: any) => route.route === '/.auth/*');
+    expect(coveredRoute).toBeUndefined();
+  });
+
   it('routes unknown paths to the SPA entry point', () => {
     expect(config.navigationFallback?.rewrite).toBe('/index.html');
     expect(config.navigationFallback?.exclude).toContain('/api/*');
