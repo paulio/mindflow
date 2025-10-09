@@ -11,12 +11,13 @@ Validate the Azure Static Web Apps deployment with Entra ID authentication, avat
 
 ## Steps
 1. **Trigger Deployment**
-   - Push or merge an update into `main` to start the GitHub Actions workflow.
-   - Wait for the pipeline to complete; note the run ID and status.
+   - Push or merge an update into `main` to start the **Azure Static Web Apps CI/CD** workflow.
+   - Monitor the run in GitHub Actions; it must pass lint, tests, and build stages before deployment begins.
+   - Download the `deployment-metadata` artifact (captures commit, actor, run number) for audit notes.
 
 2. **Review Deployment Telemetry**
-   - In Azure portal → Static Web Apps → *Monitor*, confirm a new `deployment_status` event exists for the run ID with result `succeeded`.
-   - Leave the notification settings untouched (manual review only).
+   - In Azure Portal → Static Web Apps → Monitor → Logs, run the saved query `mindflow-deployment-status` to confirm the new event with status `succeeded` and matching commit.
+   - Record the run in the operations log; no automated notifications are configured.
 
 3. **Access Production Site**
    - Visit the default production URL (`https://<app-name>.azurestaticapps.net`).
@@ -27,15 +28,19 @@ Validate the Azure Static Web Apps deployment with Entra ID authentication, avat
    - Create or open a map; confirm only maps for the signed-in user appear.
 
 5. **Validate Telemetry Request Event**
-   - Refresh the page; in Azure Monitor Live Metrics or Logs, verify an `http_request` event for the page view with status 200.
+   - Refresh the page; in Azure Monitor Logs run the saved query `mindflow-http-summary` (or the ad‑hoc request query) to observe the new `http_request` event.
 
 6. **Check Concurrent Session Policy**
    - Log in from a second browser/incognito window; confirm the first session is revoked and prompts for sign-in on next interaction.
 
 7. **Disabled Account Fallback**
    - Disable the test account in Entra ID.
-   - Attempt to access the hosted site (should block access).
-   - Run `npm install` (if needed) and `npm run dev` locally; load the disabled user's maps using the local IndexedDB export/import procedure.
+   - Attempt to access the hosted site (access should be denied with the disabled message).
+   - With the local dev server running, export the workspace using the CLI:
+     ```powershell
+     npm run export-disabled-account -- --subject <entra-subject-id> --output ./exports/<alias>.zip
+     ```
+   - Import the archive into the locally hosted Mindflow instance for support verification.
 
 8. **Rollback Drill (Optional)**
    - Mark a failed deployment in GitHub Actions to simulate an error.
@@ -52,6 +57,6 @@ Validate the Azure Static Web Apps deployment with Entra ID authentication, avat
 ## Troubleshooting
 - **No Entra ID redirect**: Verify Static Web Apps auth provider settings and allowed audiences.
 - **Avatar missing with broken image**: Check for HTTPS URL in profile; fallback asset should appear when URL blank/invalid.
-- **Telemetry empty**: Ensure diagnostic settings stream to Azure Monitor and correct resource group selected.
+- **Telemetry empty**: Ensure diagnostic settings stream to Azure Monitor, the saved queries exist, and the app was visited after deployment.
 - **Sessions not revoking**: Confirm client clears session storage and refresh tokens when receiving new session metadata.
 - **Local fallback access denied**: Double-check IndexedDB export uses matching `subjectId` isolation tag.

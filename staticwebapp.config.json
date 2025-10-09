@@ -1,0 +1,42 @@
+{
+  "platform": {
+    "apiRuntime": "node:18"
+  },
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/api/*", "/unauthorized/*"]
+  },
+  "auth": {
+    "identityProviders": {
+      "azureActiveDirectory": {
+        "registration": {
+          "login": {
+            "scopes": ["openid", "profile", "email"],
+            "loginEndpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+          }
+        }
+      }
+    }
+  },
+  "routes": [
+    {
+      "route": "/",
+      "allowedRoles": ["authenticated"]
+    },
+    {
+      "route": "/*",
+      "allowedRoles": ["authenticated"]
+    },
+    {
+      "route": "/.auth/*",
+      "allowedRoles": ["anonymous"]
+    }
+  ],
+  "responseOverrides": [
+    {
+      "statusCode": 401,
+      "serve": "/unauthorized/index.html",
+      "statusCodeOverride": 200
+    }
+  ]
+}
