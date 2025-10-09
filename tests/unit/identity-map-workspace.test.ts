@@ -57,6 +57,24 @@ describe('UserIdentity parsing', () => {
     expect(identity.avatarUrl).toBeUndefined();
   });
 
+  it('retains data URI avatars', () => {
+    const dataUri = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA';
+    const identity = parseUserIdentity({
+      clientPrincipal: {
+        ...baseProfile,
+        userDetails: 'Data Uri User',
+        claims: (baseProfile.claims ?? [])
+          .filter((claim: Claim) => claim.typ !== 'picture')
+          .concat({
+            typ: 'picture',
+            val: dataUri,
+          }),
+      },
+    });
+
+    expect(identity.avatarUrl).toBe(dataUri);
+  });
+
   it('gracefully handles profiles without claims or roles', () => {
     const identity = parseUserIdentity({
       clientPrincipal: {
