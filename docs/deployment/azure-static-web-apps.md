@@ -6,6 +6,39 @@
 - Pipeline stages: checkout → install → lint → `npm run test:ci` → `npm run build` → artifact upload → Azure Static Web Apps deploy.
 - Deployment metadata is captured in `deployment-metadata.json` (uploaded as an artifact and summarised in the job log).
 
+## Provisioning a Static Web App
+Use the helper script to create a new Azure Static Web App and (optionally) link it to the Mindflow GitHub repo. Prerequisites: Azure CLI logged in (`az login`) and permission to create resources in the target subscription.
+
+```powershell
+npm run create-static-web-app -- --name mindflow-prod --resource-group mindflow-rg --location eastus2 `
+	--source https://github.com/paulio/mindflow --branch main --token <github-pat> --tag project=mindflow --tag env=prod
+```
+
+- `--token` or `--login-with-github` is required when linking to a private repository. Use a short-lived PAT scoped to the repo.
+- Append `--dry-run` to view the Azure CLI commands without executing them.
+- The script will create the resource group if it does not exist and then call `az staticwebapp create` with the supplied parameters.
+
+After provisioning, retrieve the deployment token so the CI workflow can deploy:
+
+```powershell
+az staticwebapp secrets list --name <app-name> --resource-group <resource-group> --query properties.deploymentToken --output tsv
+```
+
+> If the command prints nothing, double-check that the Static Web App actually exists in the current subscription: `az staticwebapp show --name <app-name> --resource-group <resource-group>`. Creation fails silently when the region is unsupported—use one of the published regions (`westus2`, `centralus`, `eastus2`, `westeurope`, `eastasia`) and rerun the provisioning script before fetching the token.
+
+## GitHub Secrets Configuration
+Azure Static Web Apps requires an authenticated deploy token. Without it the workflow fails with `deployment_token was not provided`.
+
+1. In the Azure Portal, open the Static Web App resource for production.
+2. Navigate to **Settings → Deployment tokens** and copy the Primary token (regenerate if necessary).
+3. In GitHub, go to **Settings → Secrets and variables → Actions** for `/mindflow`.
+4. Create a new repository secret:
+	- **Name:** `AZURE_STATIC_WEB_APPS_API_TOKEN`
+	- **Value:** paste the token copied from Azure.
+5. Re-run the **Azure Static Web Apps CI/CD** workflow. The deploy step now authenticates and uploads `dist` successfully.
+
+> Optional: for forks or local testing where the secret is intentionally absent, set `skip_deploy_on_missing_secrets: true` in the deploy step of `.github/workflows/azure-static-web-apps.yml`. The action will skip deployment and report success while continuing to run lint/tests/build.
+
 ## Daily Telemetry Review
 1. Navigate to **Azure Portal → Static Web Apps → mindflow-prod → Monitor**.
 2. Open the saved Log Analytics query `mindflow-http-summary`:
