@@ -38,6 +38,8 @@ describe('UserIdentity parsing', () => {
     expect(identity.email).toBe('adele@contoso.com');
     expect(identity.avatarUrl).toBe('https://graph.microsoft.com/v1.0/me/photo/$value');
     expect(identity.sessionState).toBe('active');
+    expect(identity.debug?.avatar.result).toBe('accepted');
+    expect(identity.debug?.avatar.loadState).toBe('pending');
   });
 
   it('drops non-https avatar URLs and missing claims', () => {
@@ -55,6 +57,8 @@ describe('UserIdentity parsing', () => {
 	});
 
     expect(identity.avatarUrl).toBeUndefined();
+    expect(identity.debug?.avatar.result).toBe('rejected');
+    expect(identity.debug?.avatar.loadState).toBe('error');
   });
 
   it('retains data URI avatars', () => {
@@ -73,6 +77,8 @@ describe('UserIdentity parsing', () => {
     });
 
     expect(identity.avatarUrl).toBe(dataUri);
+    expect(identity.debug?.avatar.result).toBe('accepted');
+    expect(identity.debug?.avatar.loadState).toBe('pending');
   });
 
   it('gracefully handles profiles without claims or roles', () => {
@@ -90,6 +96,8 @@ describe('UserIdentity parsing', () => {
     expect(identity.roles).toEqual([]);
     expect(identity.email).toBeUndefined();
     expect(identity.tenantId).toBe('tenant-unavailable');
+    expect(identity.debug?.avatar.result).toBe('missing');
+  expect(identity.debug?.avatar.loadState).toBe('none');
   });
 });
 

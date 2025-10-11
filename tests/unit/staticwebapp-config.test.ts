@@ -34,6 +34,15 @@ describe('staticwebapp.config.json', () => {
     expect(coveredRoute).toBeUndefined();
   });
 
+  it('exposes /api/zipdeploy for anonymous POST deployments', () => {
+    const zipDeployRoute = config.routes?.find((route: any) => route.route === '/api/zipdeploy');
+    expect(zipDeployRoute).toBeDefined();
+    expect(zipDeployRoute?.allowedRoles).toContain('anonymous');
+    const methods = zipDeployRoute?.methods ?? [];
+    expect(methods).toContain('POST');
+    expect(methods).toContain('OPTIONS');
+  });
+
   it('routes unknown paths to the SPA entry point', () => {
     expect(config.navigationFallback?.rewrite).toBe('/index.html');
     expect(config.navigationFallback?.exclude).toContain('/api/*');

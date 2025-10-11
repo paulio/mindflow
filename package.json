@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "export-disabled-account": "tsx scripts/export-disabled-account.ts",
-    "create-static-web-app": "tsx scripts/create-static-web-app.ts"
+    "create-static-web-app": "tsx scripts/create-static-web-app.ts",
+    "deploy-static-web-app": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\deploy-static-web-app.ps1"
   },
   "license": "MIT",
   "devDependencies": {

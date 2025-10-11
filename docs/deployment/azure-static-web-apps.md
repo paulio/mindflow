@@ -26,6 +26,54 @@ az staticwebapp secrets list --name <app-name> --resource-group <resource-group>
 
 > If the command prints nothing, double-check that the Static Web App actually exists in the current subscription: `az staticwebapp show --name <app-name> --resource-group <resource-group>`. Creation fails silently when the region is unsupported—use one of the published regions (`westus2`, `centralus`, `eastus2`, `westeurope`, `eastasia`) and rerun the provisioning script before fetching the token.
 
+## Manual Deployment to an Existing App
+Use the PowerShell helper whenever you need to refresh the Static Web App configuration without waiting for CI (for example, when you need to retarget a different repo branch or flip SKU/tags quickly). The helper shells out to `az staticwebapp update` with the arguments supplied via the config file.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/deploy-static-web-app.ps1
+```
+
+Optional parameters:
+
+- `-ConfigPath <path>` — path to the JSON config file (defaults to `deploy.staticwebapp.secret.json`).
+- `-Name`, `-ResourceGroup`, `-Subscription`, `-DeploymentToken`, `-Source`, `-Branch`, `-Sku`, `-Tags` — override values pulled from the config file.
+- `-NoWait` — pass `--no-wait` to the Azure CLI command.
+- `-SkipBuild` — skip the informational build reminder. (No artifacts are uploaded via `az staticwebapp update`.)
+
+> Prerequisites: log in with `az login` and install the Static Web Apps CLI extension (`az extension add --name staticwebapp`) if it is not already present. The script fails fast when `az` or the extension is missing.
+
+### One-command deploy with a local secret config
+
+Start by copying the tracked placeholder to your local secret file:
+
+```powershell
+Copy-Item deploy.staticwebapp.secret.example.json deploy.staticwebapp.secret.json
+```
+
+Then edit `deploy.staticwebapp.secret.json` (already `.gitignore`d) with the required arguments:
+
+```jsonc
+{
+	"name": "mindflow-prod",
+	"resourceGroup": "mindflow",
+	"subscription": "<subscription-id>",
+	"source": "https://github.com/paulio/mindflow",
+	"branch": "main",
+	"token": "<optional-repo-token>",
+	"sku": "Standard",
+	"tags": "env=prod project=mindflow",
+	"noWait": false
+}
+```
+
+Finally, invoke the script without repeating the flags:
+
+```powershell
+npm run deploy-static-web-app
+```
+
+Command-line arguments continue to override config file values. Keep the JSON out of source control—it’s ignored via `.gitignore`—and rotate the deployment token if the file is ever shared.
+
 ## Entra ID Authentication Setup
 Authentication is enforced for every application route (`/*`). Static Web Apps expects an Azure AD app registration, with its identifiers supplied via app settings that match the keys referenced in `staticwebapp.config.json`.
 

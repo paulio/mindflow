@@ -4,6 +4,7 @@ import type { ImportEntry, ImportSummary } from '../../lib/export';
 import { EXPORT_MANIFEST_VERSION } from '../../lib/export';
 import { getThumbnailBlob } from '../../lib/indexeddb';
 import type { GraphRecord } from '../../lib/types';
+import { BUILD_VERSION } from '../../lib/build-info';
 import ThumbnailSkeleton from '../ui/ThumbnailSkeleton';
 import ThumbnailStatusBadge, { type ThumbnailStatusBadgeState } from '../ui/ThumbnailStatusBadge';
 
@@ -748,10 +749,13 @@ export const MapLibrary: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
       <header style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: 12 }}>
         <strong style={{ fontSize: 20, flex: 1 }}>Mindflow Library</strong>
-        <button onClick={() => newGraph()} style={{ padding: '6px 12px' }}>New Map</button>
-        <button onClick={() => setExportDialogOpen(true)} disabled={!hasSelection} style={{ padding: '6px 12px' }}>Export</button>
-        <button onClick={handleImportClick} style={{ padding: '6px 12px' }}>Import</button>
-        <input ref={fileInputRef} type="file" accept="application/zip,.zip" style={{ display: 'none' }} onChange={handleFileChange} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 11, color: 'rgba(245,245,245,0.55)', letterSpacing: '0.04em' }}>Build {BUILD_VERSION}</span>
+          <button onClick={() => newGraph()} style={{ padding: '6px 12px' }}>New Map</button>
+          <button onClick={() => setExportDialogOpen(true)} disabled={!hasSelection} style={{ padding: '6px 12px' }}>Export</button>
+          <button onClick={handleImportClick} style={{ padding: '6px 12px' }}>Import</button>
+          <input ref={fileInputRef} type="file" accept="application/zip,.zip" style={{ display: 'none' }} onChange={handleFileChange} />
+        </div>
       </header>
       <main style={{ flex: 1, display: 'flex', gap: 24, padding: '16px', overflow: 'auto' }}>
         <section style={{ flex: 1, minWidth: 320 }}>
