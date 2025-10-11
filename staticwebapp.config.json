@@ -28,6 +28,11 @@
       "allowedRoles": ["authenticated"]
     },
     {
+      "route": "/api/zipdeploy",
+      "methods": ["POST", "OPTIONS"],
+      "allowedRoles": ["anonymous"]
+    },
+    {
       "route": "/*",
       "allowedRoles": ["authenticated"]
     }
