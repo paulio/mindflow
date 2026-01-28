@@ -18,18 +18,22 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
   const editing = editingNodeId === id;
   const [draft, setDraft] = useState(text);
   const textareaRef = useRef<HTMLTextAreaElement|null>(null);
+  const didAutoPlaceCaretRef = useRef(false);
 
   // When entering edit mode focus and place caret at end.
   useEffect(() => {
-    if (editing) {
-      const ta = textareaRef.current;
-      if (ta) {
-        ta.focus();
-        const len = draft.length;
-        ta.setSelectionRange(len, len);
-      }
+    if (!editing) {
+      didAutoPlaceCaretRef.current = false;
+      return;
     }
-  }, [editing, draft.length]);
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.focus();
+    if (didAutoPlaceCaretRef.current) return;
+    const len = ta.value.length;
+    ta.setSelectionRange(len, len);
+    didAutoPlaceCaretRef.current = true;
+  }, [editing, id]);
   // Sync incoming text when not editing
   useEffect(() => { if (!editing) setDraft(text); }, [text, editing]);
 

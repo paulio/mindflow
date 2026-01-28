@@ -30,19 +30,16 @@ const baseProfile: ClientPrincipal = {
 };
 
 describe('UserIdentity parsing', () => {
-  it('extracts required fields and normalizes avatar', () => {
+  it('extracts required fields', () => {
     const identity = parseUserIdentity({ clientPrincipal: baseProfile });
     expect(identity.subjectId).toBe(baseProfile.userId);
     expect(identity.tenantId).toBe('11111111-2222-3333-4444-555555555555');
     expect(identity.displayName).toBe('Adele Vance');
     expect(identity.email).toBe('adele@contoso.com');
-    expect(identity.avatarUrl).toBe('https://graph.microsoft.com/v1.0/me/photo/$value');
     expect(identity.sessionState).toBe('active');
-    expect(identity.debug?.avatar.result).toBe('accepted');
-    expect(identity.debug?.avatar.loadState).toBe('pending');
   });
 
-  it('drops non-https avatar URLs and missing claims', () => {
+  it('ignores avatar claims', () => {
     const identity = parseUserIdentity({
 		clientPrincipal: {
 			...baseProfile,
@@ -56,29 +53,7 @@ describe('UserIdentity parsing', () => {
 		},
 	});
 
-    expect(identity.avatarUrl).toBeUndefined();
-    expect(identity.debug?.avatar.result).toBe('rejected');
-    expect(identity.debug?.avatar.loadState).toBe('error');
-  });
-
-  it('retains data URI avatars', () => {
-    const dataUri = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA';
-    const identity = parseUserIdentity({
-      clientPrincipal: {
-        ...baseProfile,
-        userDetails: 'Data Uri User',
-        claims: (baseProfile.claims ?? [])
-          .filter((claim: Claim) => claim.typ !== 'picture')
-          .concat({
-            typ: 'picture',
-            val: dataUri,
-          }),
-      },
-    });
-
-    expect(identity.avatarUrl).toBe(dataUri);
-    expect(identity.debug?.avatar.result).toBe('accepted');
-    expect(identity.debug?.avatar.loadState).toBe('pending');
+  expect('avatarUrl' in identity).toBe(false);
   });
 
   it('gracefully handles profiles without claims or roles', () => {
@@ -96,8 +71,6 @@ describe('UserIdentity parsing', () => {
     expect(identity.roles).toEqual([]);
     expect(identity.email).toBeUndefined();
     expect(identity.tenantId).toBe('tenant-unavailable');
-    expect(identity.debug?.avatar.result).toBe('missing');
-  expect(identity.debug?.avatar.loadState).toBe('none');
   });
 });
 

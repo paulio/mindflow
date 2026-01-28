@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
-import { render, fireEvent } from '@testing-library/react';
+import { act, render, fireEvent } from '@testing-library/react';
 import { GraphProvider, useGraph } from '../../src/state/graph-store';
 import { GraphCanvas } from '../../src/components/graph/GraphCanvas';
 import { ReactFlowProvider } from 'reactflow';
@@ -26,7 +26,9 @@ function setup() {
 describe('FR-005a/b double-click edit + commit (RTL harness)', () => {
   it('double-click enters edit mode and Enter commits', async () => {
     const utils = setup();
-    await new Promise(r => setTimeout(r, 0));
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 0));
+    });
     const label = await utils.findByText('New Thought');
     fireEvent.doubleClick(label);
     const textarea = utils.getByLabelText('Edit thought text') as HTMLTextAreaElement;
@@ -35,5 +37,28 @@ describe('FR-005a/b double-click edit + commit (RTL harness)', () => {
     fireEvent.keyDown(textarea, { key: 'Enter' });
     const updated = await utils.findByText('Reframed Idea');
     expect(updated).toBeTruthy();
+  });
+
+  it('does not force caret to end on every keystroke', async () => {
+    const spy = vi.spyOn(HTMLTextAreaElement.prototype, 'setSelectionRange');
+    const utils = setup();
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 0));
+    });
+
+    const label = await utils.findByText('New Thought');
+    fireEvent.doubleClick(label);
+    const textarea = utils.getByLabelText('Edit thought text') as HTMLTextAreaElement;
+
+    // Clear initial caret placement call that happens on edit entry.
+    spy.mockClear();
+
+    fireEvent.change(textarea, { target: { value: 'New XThought' } });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 0));
+    });
+
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

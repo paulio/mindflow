@@ -97,6 +97,7 @@ const REFERENCE_MARKER_SIZE = 9;
 
 export const GraphCanvas: React.FC = () => {
   const { nodes, edges, references, selectedReferenceId, selectReference, deleteReference, startEditing, editingNodeId, moveNode, addEdge, addConnectedNode, graph, updateViewport, selectNode, activeTool, addAnnotation, updateEdgeHandles, createReference, repositionReference, selectedNodeIds, replaceSelection, addToSelection, marquee, beginMarquee, updateMarquee, endMarquee, cancelMarquee, activateMarquee, interactionMode } = useGraph() as any;
+  const DEFAULT_VIEWPORT = useMemo(() => ({ x: 0, y: 0, zoom: 1 }), []);
   // Local React Flow controlled nodes (decoupled from store during drag for stability)
   const [flowNodes, setFlowNodes] = useState<any[]>([]);
   // Version bump to coerce ReactFlow rerender when selection changes programmatically
@@ -168,7 +169,7 @@ export const GraphCanvas: React.FC = () => {
       try { rfInstance.setViewport({ x, y, zoom }, { duration: 0 }); } catch { /* ignore */ }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph?.id]);
+  }, [graph?.id, selectionVersion]);
   // Track the start of a connection drag so we can create a node if released on pane.
   const connectStartRef = useRef<{ nodeId: string; handleId?: string; startClientX: number; startClientY: number } | null>(null);
 
@@ -558,7 +559,7 @@ export const GraphCanvas: React.FC = () => {
   edges={rfEdges}
   nodeTypes={nodeTypes}
   edgeTypes={edgeTypes}
-        fitView
+      defaultViewport={graph?.viewport ? { ...graph.viewport } : DEFAULT_VIEWPORT}
   onNodesChange={onNodesChange}
   onEdgesChange={onEdgesChange}
   onNodeDragStop={onNodeDragStop}
