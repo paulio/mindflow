@@ -172,6 +172,9 @@ export const GraphCanvas: React.FC = () => {
   }, [graph?.id, selectionVersion]);
   // Track the start of a connection drag so we can create a node if released on pane.
   const connectStartRef = useRef<{ nodeId: string; handleId?: string; startClientX: number; startClientY: number } | null>(null);
+  // React Flow calls onConnectEnd even when a connection is successfully made.
+  // We track whether onConnect fired during the active drag so we don't also create a brand new node.
+  const connectSucceededRef = useRef(false);
 
   const DRAG_THRESHOLD = 40; // Halved from 80 per request: shorter drag creates node/connection
   const rfNodes = flowNodes; // already memoized by state
@@ -214,6 +217,7 @@ export const GraphCanvas: React.FC = () => {
   // Native edge update only (fallback logic removed)
   // When updating an existing edge endpoint, hide opposite handles
   const onEdgeUpdateStart = (_: any, __: any, handleType: 'source' | 'target') => {
+    connectSucceededRef.current = false;
     if (handleType) {
       // eslint-disable-next-line no-console
       console.log('[connector drag start][update]', handleType);
@@ -223,6 +227,8 @@ export const GraphCanvas: React.FC = () => {
   const onEdgeUpdateEnd = () => { setActiveDragType(null); };
   const onEdgeUpdate = (oldEdge: any, newConnection: any) => {
     if (!oldEdge) return;
+    // Treat edge updates as a successful connection so onConnectEnd doesn't also spawn a node.
+    connectSucceededRef.current = true;
     if (oldEdge.data?.ref) {
       // Reposition reference endpoints
       if (!newConnection.source || !newConnection.target) return;
@@ -260,6 +266,7 @@ export const GraphCanvas: React.FC = () => {
   // Add edge when both ends valid
   const onConnect = (connection: Connection) => {
     if (connection.source && connection.target) {
+      connectSucceededRef.current = true;
       // Create a reference connection instead of a structural thought edge
       createReference(connection.source, connection.target, 'single', connection.sourceHandle ?? undefined, connection.targetHandle ?? undefined);
       // eslint-disable-next-line no-console
@@ -269,6 +276,7 @@ export const GraphCanvas: React.FC = () => {
 
   const onConnectStart: OnConnectStart = (evt, params) => {
     if (!params.nodeId) return;
+    connectSucceededRef.current = false;
     let clientX = 0; let clientY = 0;
     if ('clientX' in evt) {
       clientX = (evt as any).clientX;
@@ -290,6 +298,23 @@ export const GraphCanvas: React.FC = () => {
     connectStartRef.current = null;
     if (!start) { setActiveDragType(null); return; }
     setActiveDragType(null);
+
+    // If a valid connection was completed, do not run drop-on-pane node creation.
+    if (connectSucceededRef.current) {
+      connectSucceededRef.current = false;
+      return;
+    }
+
+    // Some browsers/DOM setups report the pane as the event target even when the drop was on a handle.
+    // If the composed path includes a handle, do not create a node.
+    try {
+      const path = (evt as any).composedPath?.() as unknown[] | undefined;
+      if (path && path.some((el: any) => el?.classList?.contains?.('react-flow__handle'))) {
+        return;
+      }
+    } catch {
+      // ignore
+    }
     const target = evt.target as HTMLElement | null;
     if (target && target.classList.contains('react-flow__pane')) {
       let clientX = 0; let clientY = 0;
