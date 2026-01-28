@@ -76,7 +76,7 @@ export interface ThumbnailGenerationResult {
 
 export async function generateThumbnailFromSnapshot(snapshot: PersistenceSnapshot): Promise<ThumbnailGenerationResult> {
   const start = getNow();
-  const rawBlob = await exportGraphAsPng(snapshot.graph, snapshot.nodes, snapshot.edges);
+  const rawBlob = await exportGraphAsPng(snapshot.graph, snapshot.nodes, snapshot.edges, { references: snapshot.references ?? [] });
   if (!rawBlob) {
     throw new Error('Unable to export graph as PNG');
   }

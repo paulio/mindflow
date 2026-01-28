@@ -808,6 +808,7 @@ function resolveThemeFromDOM(): CanvasThemeLike {
 export interface ExportGraphAsPngOptions {
   persistThumbnail?: boolean;
   trigger?: ThumbnailTrigger;
+  references?: ReferenceConnectionRecord[];
 }
 
 export async function exportGraphAsPng(
@@ -817,6 +818,7 @@ export async function exportGraphAsPng(
   options: ExportGraphAsPngOptions = {},
 ): Promise<Blob | null> {
   if (!nodes.length) return null;
+  const references = options.references ?? [];
   // Approx node dimensions (current styling): width dynamic; we'll measure longest text length
   const theme = resolveThemeFromDOM();
   const padding = 32;
@@ -928,6 +930,48 @@ export async function exportGraphAsPng(
     const a = center.get(e.sourceNodeId); const b = center.get(e.targetNodeId);
     if (!a || !b) continue;
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+
+  // Reference connectors (directional)
+  function drawArrowhead(from: { x: number; y: number }, to: { x: number; y: number }, size: number) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.hypot(dx, dy);
+    if (!len) return;
+    const ux = dx / len;
+    const uy = dy / len;
+    // Base point a bit back from the tip
+    const bx = to.x - ux * size;
+    const by = to.y - uy * size;
+    // Perpendicular
+    const px = -uy;
+    const py = ux;
+    const half = size * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(to.x, to.y);
+    ctx.lineTo(bx + px * half, by + py * half);
+    ctx.lineTo(bx - px * half, by - py * half);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = '#888';
+  ctx.fillStyle = '#888';
+  ctx.lineWidth = 2;
+  for (const r of references) {
+    const a = center.get(r.sourceNodeId); const b = center.get(r.targetNodeId);
+    if (!a || !b) continue;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    const style = r.style || 'single';
+    if (style === 'single' || style === 'double') {
+      drawArrowhead(a, b, 10);
+    }
+    if (style === 'double') {
+      drawArrowhead(b, a, 10);
+    }
   }
   // Nodes
   ctx.font = '12px system-ui';
