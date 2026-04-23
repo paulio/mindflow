@@ -788,6 +788,101 @@ export function exportGraphAsMarkdown(graph: GraphRecord, nodes: NodeRecord[], e
   return lines.join('\n') + '\n';
 }
 
+function escapePlantUmlLabel(text: string): string {
+  // PlantUML mindmap labels: collapse newlines to a space and trim. Backslashes/special chars
+  // are left intact since mindmap text is largely free-form; only line breaks need handling.
+  return text
+    .replace(/\r?\n+/g, ' ')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
+
+export function exportGraphAsPlantUml(graph: GraphRecord, nodes: NodeRecord[], edges: EdgeRecord[]): string {
+  const header = '@startmindmap';
+  const footer = '@endmindmap';
+  const titleLine = `title ${graph.name || 'Untitled Map'}`;
+  if (!nodes.length) {
+    return `${header}\n${titleLine}\n* ${escapePlantUmlLabel(graph.name || 'Untitled Map')}\n${footer}\n`;
+  }
+
+  // Build adjacency (undirected) — same approach as markdown export
+  const adj = new Map<string, Set<string>>();
+  function add(a: string, b: string) { (adj.get(a) || adj.set(a, new Set()).get(a)!).add(b); }
+  for (const e of edges) { add(e.sourceNodeId, e.targetNodeId); add(e.targetNodeId, e.sourceNodeId); }
+
+  const byId = new Map(nodes.map(n => [n.id, n] as const));
+  const globalOrder = [...nodes].sort((a, b) => a.created === b.created ? a.id.localeCompare(b.id) : a.created.localeCompare(b.created));
+  const globalRootId = findRootNodeId(nodes) as string;
+
+  const visited = new Set<string>();
+  // List of component trees: each is a flat array of { depth, label } emitted in DFS order
+  interface Emitted { depth: number; label: string; }
+  const components: Emitted[][] = [];
+
+  function buildComponentTree(rootId: string): Emitted[] {
+    const out: Emitted[] = [];
+    const queue: string[] = [rootId];
+    visited.add(rootId);
+    const depth = new Map<string, number>(); depth.set(rootId, 0);
+    const parent = new Map<string, string | null>(); parent.set(rootId, null);
+    while (queue.length) {
+      const cur = queue.shift()!;
+      const nbrs = adj.get(cur);
+      if (!nbrs) continue;
+      const orderedNbrs = [...nbrs].filter(id => !visited.has(id)).sort((a, b) => {
+        const na = byId.get(a)!; const nb = byId.get(b)!;
+        return na.created === nb.created ? na.id.localeCompare(nb.id) : na.created.localeCompare(nb.created);
+      });
+      for (const nId of orderedNbrs) {
+        visited.add(nId);
+        parent.set(nId, cur);
+        depth.set(nId, (depth.get(cur) || 0) + 1);
+        queue.push(nId);
+      }
+    }
+    const children = new Map<string, string[]>();
+    for (const [id, p] of parent) { if (p !== null) { (children.get(p) || children.set(p, []).get(p)!).push(id); } }
+    for (const [, arr] of children) {
+      arr.sort((a, b) => {
+        const na = byId.get(a)!; const nb = byId.get(b)!;
+        return na.created === nb.created ? na.id.localeCompare(nb.id) : na.created.localeCompare(nb.created);
+      });
+    }
+    function emit(id: string) {
+      const d = depth.get(id) || 0;
+      const rec = byId.get(id)!;
+      out.push({ depth: d, label: escapePlantUmlLabel(rec.text || 'New Thought') });
+      const kids = children.get(id) || [];
+      for (const k of kids) emit(k);
+    }
+    emit(rootId);
+    return out;
+  }
+
+  if (globalRootId) components.push(buildComponentTree(globalRootId));
+  for (const n of globalOrder) {
+    if (!visited.has(n.id)) components.push(buildComponentTree(n.id));
+  }
+
+  const lines: string[] = [header, titleLine];
+  if (components.length === 1) {
+    for (const item of components[0]) {
+      lines.push(`${'*'.repeat(item.depth + 1)} ${item.label}`);
+    }
+  } else {
+    // Multiple disconnected components: introduce a synthetic root using the graph name so
+    // PlantUML can render a single mindmap diagram (mindmaps require exactly one root).
+    lines.push(`* ${escapePlantUmlLabel(graph.name || 'Untitled Map')}`);
+    for (const comp of components) {
+      for (const item of comp) {
+        lines.push(`${'*'.repeat(item.depth + 2)} ${item.label}`);
+      }
+    }
+  }
+  lines.push(footer);
+  return lines.join('\n') + '\n';
+}
+
 interface CanvasThemeLike {
   nodeBg: string; nodeBorder: string; nodeText: string; edgeColor: string; background: string; borderWidth: number; radius: number;
 }

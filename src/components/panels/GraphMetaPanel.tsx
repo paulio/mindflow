@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useGraph } from '../../state/graph-store';
 import { BORDER_COLOUR_PALETTE } from '../../lib/node-border-palette';
-import { exportGraphAsMarkdown, exportGraphAsPng, triggerDownload } from '../../lib/export';
+import { exportGraphAsMarkdown, exportGraphAsPlantUml, exportGraphAsPng, triggerDownload } from '../../lib/export';
 import { useTheme } from '../../state/theme-store';
 import { NoteFormatPanel } from './NoteFormatPanel';
 
@@ -365,6 +365,12 @@ export const GraphMetaPanel: React.FC = () => {
                 const blob = new Blob([md], { type: 'text/markdown' });
                 triggerDownload(`${graph.name || 'graph'}.md`, blob as any);
               }}>Markdown</button>
+              <button type="button" style={{ background:'#222', color:'#fff', padding:'4px 8px', border:'1px solid #444', cursor:'pointer' }} onClick={() => {
+                if (!graph) return;
+                const puml = exportGraphAsPlantUml(graph, nodes, edges);
+                const blob = new Blob([puml], { type: 'text/plain' });
+                triggerDownload(`${graph.name || 'graph'}.puml`, blob as any);
+              }}>PlantUML</button>
             </div>
           </div>
         </div>
