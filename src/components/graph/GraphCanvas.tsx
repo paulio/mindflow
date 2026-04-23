@@ -589,8 +589,8 @@ export const GraphCanvas: React.FC = () => {
   onEdgesChange={onEdgesChange}
   onNodeDragStop={onNodeDragStop}
         zoomOnDoubleClick={false}
-        zoomOnScroll={false}
-        zoomOnPinch={false}
+        zoomOnScroll={true}
+        zoomOnPinch={true}
   panOnScroll={interactionMode === 'grab'}
   panOnDrag={interactionMode === 'grab'}
   onNodeClick={(e, node) => {
