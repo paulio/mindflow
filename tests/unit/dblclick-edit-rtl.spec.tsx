@@ -36,4 +36,20 @@ describe('FR-005a/b double-click edit + commit (RTL harness)', () => {
     const updated = await utils.findByText('Reframed Idea');
     expect(updated).toBeTruthy();
   });
+
+  it('preserves the insertion point while editing', async () => {
+    const utils = setup();
+    await new Promise(r => setTimeout(r, 0));
+    const label = await utils.findByText('New Thought');
+    fireEvent.doubleClick(label);
+    const textarea = utils.getByLabelText('Edit thought text') as HTMLTextAreaElement;
+
+    textarea.setSelectionRange(3, 3);
+    fireEvent.change(textarea, {
+      target: { value: 'NewX Thought', selectionStart: 4, selectionEnd: 4 }
+    });
+
+    expect(textarea.selectionStart).toBe(4);
+    expect(textarea.selectionEnd).toBe(4);
+  });
 });

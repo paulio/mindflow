@@ -25,11 +25,11 @@ export const ThoughtNode: React.FC<Props> = ({ id, text, selected }) => {
       const ta = textareaRef.current;
       if (ta) {
         ta.focus();
-        const len = draft.length;
+        const len = ta.value.length;
         ta.setSelectionRange(len, len);
       }
     }
-  }, [editing, draft.length]);
+  }, [editing]);
   // Sync incoming text when not editing
   useEffect(() => { if (!editing) setDraft(text); }, [text, editing]);
 
