@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useGraph } from '../../state/graph-store';
 import { BORDER_COLOUR_PALETTE } from '../../lib/node-border-palette';
-import { exportGraphAsMarkdown, exportGraphAsPng, triggerDownload } from '../../lib/export';
+import { canvasToBlob, exportGraphAsMarkdown, exportGraphAsPng, persistThumbnailFromCanvas, triggerDownload } from '../../lib/export';
+import { captureReactFlowPng } from '../../lib/react-flow-png-capture';
 import { useTheme } from '../../state/theme-store';
 import { NoteFormatPanel } from './NoteFormatPanel';
 
@@ -356,7 +357,18 @@ export const GraphMetaPanel: React.FC = () => {
             <div style={{ display:'flex', gap:6 }}>
               <button type="button" style={{ background:'#222', color:'#fff', padding:'4px 8px', border:'1px solid #444', cursor:'pointer' }} onClick={async () => {
                 if (!graph) return;
-                const blob = await exportGraphAsPng(graph, nodes, edges, { persistThumbnail: true, trigger: 'export' });
+                let blob: Blob | null = null;
+                const mountedSurface = document.querySelector<HTMLElement>('.mf-graph-export-surface.react-flow');
+                const mountedCanvas = await captureReactFlowPng(mountedSurface);
+                if (mountedCanvas) {
+                  blob = await canvasToBlob(mountedCanvas).catch(() => null);
+                  if (blob) {
+                    await persistThumbnailFromCanvas(mountedCanvas, { mapId: graph.id, trigger: 'export' });
+                  }
+                }
+                if (!blob) {
+                  blob = await exportGraphAsPng(graph, nodes, edges, { persistThumbnail: true, trigger: 'export' });
+                }
                 if (blob) triggerDownload(`${graph.name || 'graph'}.png`, blob);
               }}>PNG</button>
               <button type="button" style={{ background:'#222', color:'#fff', padding:'4px 8px', border:'1px solid #444', cursor:'pointer' }} onClick={() => {

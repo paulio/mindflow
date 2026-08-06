@@ -704,6 +704,7 @@ import JSZip from 'jszip';
 import { NodeRecord, EdgeRecord, GraphRecord, PersistenceSnapshot, ReferenceConnectionRecord } from './types';
 import { findRootNodeId } from './hierarchy';
 import { resolveNodeBackground } from './background-precedence';
+import { type BezierCurve, type ExportRect, getBezierBounds, getBezierCurve, getHandleAnchor } from './export-geometry';
 import { putThumbnail } from './indexeddb';
 import { THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, ThumbnailTrigger, logThumbnailRefreshEvent } from './thumbnails';
 
@@ -839,7 +840,7 @@ export async function exportGraphAsPng(
       const el = document.querySelector(`.react-flow__node[data-id="${esc}"]`);
       if (!el) return null;
       const r = (el as HTMLElement).getBoundingClientRect();
-      if (r.width < 10 || r.height < 10) return null;
+      if (!Number.isFinite(r.width) || !Number.isFinite(r.height) || r.width <= 0 || r.height <= 0) return null;
       return { w: r.width, h: r.height };
     } catch { return null; }
   }
@@ -880,12 +881,14 @@ export async function exportGraphAsPng(
     return out.length ? out : [''];
   }
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const rects = new Map<string, ExportRect>();
   for (const n of nodes) {
     const rawText = (n.text || 'New Thought');
     const baseLines = rawText.split(/\r?\n/);
     const domDim = measureFromDOM(n.id); // if present we still wrap to keep consistency; width acts as constraint
-    let w = domDim ? domDim.w : (n.width ? Math.min(MAX_W, Math.max(MIN_W, n.width)) : roughEstimateWidth(baseLines));
-    w = Math.max(MIN_W, Math.min(MAX_W, w));
+    const persistedWidth = typeof n.width === 'number' && Number.isFinite(n.width) && n.width > 0 ? n.width : null;
+    const resolvedWidth = domDim?.w ?? persistedWidth;
+    let w = resolvedWidth ?? roughEstimateWidth(baseLines);
     const contentMax = Math.max(20, w - INNER_PADDING_X * 2);
     let wrapped: string[] = [];
     for (const bl of baseLines) {
@@ -893,28 +896,48 @@ export async function exportGraphAsPng(
       wrapped.push(...parts);
     }
     // Recalculate width to fit the widest wrapped line if we didn't rely on DOM measurement
-    if (!domDim && mctx) {
+    if (resolvedWidth === null && mctx) {
       let maxLine = 0; for (const l of wrapped) { const lw = mctx.measureText(l).width; if (lw > maxLine) maxLine = lw; }
       const targetW = maxLine + INNER_PADDING_X * 2 + 1; // +1 for rounding
       w = Math.max(MIN_W, Math.min(MAX_W, Math.max(w, targetW)));
     }
-    let h = Math.max(MIN_H, wrapped.length * lineHeight + 8);
-    if (n.height) h = Math.max(h, n.height);
+    const persistedHeight = typeof n.height === 'number' && Number.isFinite(n.height) && n.height > 0 ? n.height : null;
+    const computedHeight = Math.max(MIN_H, wrapped.length * lineHeight + 8);
+    const h = domDim?.h ?? Math.max(computedHeight, persistedHeight ?? 0);
     dims.set(n.id, { w, h, lines: wrapped });
+    rects.set(n.id, { x: n.x, y: n.y, width: w, height: h });
     minX = Math.min(minX, n.x);
     minY = Math.min(minY, n.y);
     maxX = Math.max(maxX, n.x + w);
     maxY = Math.max(maxY, n.y + h);
   }
+  const curves: BezierCurve[] = [];
+  for (const e of edges) {
+    const sourceRect = rects.get(e.sourceNodeId);
+    const targetRect = rects.get(e.targetNodeId);
+    if (!sourceRect || !targetRect) continue;
+    const curve = getBezierCurve(
+      getHandleAnchor(sourceRect, e.sourceHandleId),
+      getHandleAnchor(targetRect, e.targetHandleId),
+    );
+    curves.push(curve);
+    const bounds = getBezierBounds(curve);
+    minX = Math.min(minX, bounds.minX);
+    minY = Math.min(minY, bounds.minY);
+    maxX = Math.max(maxX, bounds.maxX);
+    maxY = Math.max(maxY, bounds.maxY);
+  }
   const width = (maxX - minX) + padding * 2;
   const height = (maxY - minY) + padding * 2;
+  const renderScale = Math.min(1, 8000 / width, 8000 / height);
   const canvas = document.createElement('canvas');
-  canvas.width = Math.min(width, 8000);
-  canvas.height = Math.min(height, 8000);
+  canvas.width = Math.min(8000, Math.ceil(width * renderScale));
+  canvas.height = Math.min(8000, Math.ceil(height * renderScale));
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
   ctx.fillStyle = theme.background;
   ctx.fillRect(0,0,canvas.width, canvas.height);
+  if (renderScale < 1) ctx.scale(renderScale, renderScale);
   // Build node lookup and center positions
   const center = new Map<string, { x: number; y: number }>();
   for (const n of nodes) {
@@ -924,10 +947,16 @@ export async function exportGraphAsPng(
   // Edges
   ctx.strokeStyle = theme.edgeColor;
   ctx.lineWidth = 1;
-  for (const e of edges) {
-    const a = center.get(e.sourceNodeId); const b = center.get(e.targetNodeId);
-    if (!a || !b) continue;
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  for (const curve of curves) {
+    const translate = (point: { x: number; y: number }) => ({ x: point.x - minX + padding, y: point.y - minY + padding });
+    const start = translate(curve.start);
+    const control1 = translate(curve.control1);
+    const control2 = translate(curve.control2);
+    const end = translate(curve.end);
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.bezierCurveTo(control1.x, control1.y, control2.x, control2.y, end.x, end.y);
+    ctx.stroke();
   }
   // Nodes
   ctx.font = '12px system-ui';
@@ -979,7 +1008,7 @@ export async function exportGraphAsPng(
   }
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+export function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(blob => {
       if (blob) resolve(blob);

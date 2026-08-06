@@ -554,6 +554,7 @@ export const GraphCanvas: React.FC = () => {
     <div style={{ flex: 1, position: 'relative' }} ref={paneRef}>
   <ReactFlow
   key={selectionVersion}
+  className="mf-graph-export-surface"
   nodes={rfNodes}
   edges={rfEdges}
   nodeTypes={nodeTypes}
